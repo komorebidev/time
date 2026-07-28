@@ -4,6 +4,7 @@ on:
   push:
     paths:
       - 'time/**/*.md'
+  workflow_dispatch:
 
 jobs:
   build-and-send:
