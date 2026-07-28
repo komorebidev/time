@@ -85,3 +85,10 @@ az communication email domain show --email-service-name "worklog-emailService" -
 az group delete --name ***
 az group delete --name worklog-rg
 ```
+# Troubleshooting
+
+* To check email delivery logs, need to register this resource in Azure
+
+```powershell
+az provider register --namespace Microsoft.Insights
+```
