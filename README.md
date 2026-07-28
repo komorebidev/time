@@ -1,4 +1,3 @@
 # Worklogs
-For recording tasks and schedule.
 
-Click on the year and corresponding month file to view.
+Click on the year folder and month file to view
