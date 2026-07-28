@@ -71,6 +71,14 @@ az communication email domain show --email-service-name "worklog-emailService" -
 
 * If rebuilding resources, update the key in Github Actions
 
+## Filling in the repository secrets
+
+* Navigate to Settings > Secrets and variables > Actions
+* Click New repository secret and add the following three secrets one by one:
+* AZURE_COMMUNICATION_CONNECTION_STRING
+* SENDER_EMAIL
+* RECIPIENT_EMAIL
+
 # Cleanup
 
 ```powershell
