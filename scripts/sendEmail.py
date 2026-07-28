@@ -32,6 +32,20 @@ def parse_checklist_log(file_content):
     return entries
 
 
+def is_out_of_office(entry):
+    """
+    Detect entries that should be marked as Outlook OOF.
+    """
+    text = entry["content"].lower()
+
+    keywords = [
+        "day off",
+        "holiday"
+    ]
+
+    return any(keyword in text for keyword in keywords)
+
+
 def create_ics(entries):
     cal = Calendar()
     cal.add('prodid', '-//Worklog Automation//mxp//')
@@ -40,12 +54,37 @@ def create_ics(entries):
     for entry in entries:
         event = Event()
 
-        event.add(
-            'summary',
-            f"Work Log: {entry['date']}"
-        )
+        if is_out_of_office(entry):
+            event.add(
+                'summary',
+                "Out of Office"
+            )
 
-        # Normalize bullets and preserve line breaks for Outlook
+            event.add(
+                'X-MICROSOFT-CDO-BUSYSTATUS',
+                'OOF',
+                parameters={'VALUE': 'TEXT'}
+            )
+
+            event.add(
+                'X-MICROSOFT-CDO-INTENDEDSTATUS',
+                'OOF',
+                parameters={'VALUE': 'TEXT'}
+            )
+
+        else:
+            event.add(
+                'summary',
+                f"Work Log: {entry['date']}"
+            )
+
+            event.add(
+                'X-MICROSOFT-CDO-BUSYSTATUS',
+                'BUSY',
+                parameters={'VALUE': 'TEXT'}
+            )
+
+        # Preserve line breaks for Outlook
         description = entry['content']
 
         description = re.sub(
