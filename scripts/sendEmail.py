@@ -16,9 +16,9 @@ def parse_checklist_log(file_content):
     for status, date_str, content in matches:
         cleaned_content = content.strip()
 
-        # Convert markdown bullet points into calendar-friendly bullet lines
+        # Convert markdown bullets into separate lines
         cleaned_content = re.sub(
-            r'\n\s*-\s+',
+            r'\n\s*[-*]\s+',
             '\n• ',
             cleaned_content
         )
@@ -45,17 +45,40 @@ def create_ics(entries):
             f"Work Log: {entry['date']}"
         )
 
-        # Escape line breaks for ICS format so calendar apps display bullets separately
-        description = entry['content'].replace('\n', '\\n')
-        event.add('description', description)
+        # Normalize bullets and preserve line breaks for Outlook
+        description = entry['content']
+
+        description = re.sub(
+            r'\s*\*\s+',
+            '\r\n• ',
+            description
+        )
+
+        description = re.sub(
+            r'\s*-\s+',
+            '\r\n• ',
+            description
+        )
+
+        event.add(
+            'description',
+            description
+        )
 
         d = datetime.strptime(
             entry['date'],
             '%Y-%m-%d'
         ).date()
 
-        event.add('dtstart', d)
-        event.add('dtend', d)
+        event.add(
+            'dtstart',
+            d
+        )
+
+        event.add(
+            'dtend',
+            d
+        )
 
         event.add(
             'uid',
