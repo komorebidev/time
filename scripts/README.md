@@ -2,6 +2,12 @@
 
 Push work logs to calendar as ics invites using Azure resources
 
+# Features
+
+* Converts markdown to Outlook ICS format
+* Supports multiple markdown file changes at once
+* Does not create duplicate events
+
 ## Resources
 
 ### Azure Communication Services
