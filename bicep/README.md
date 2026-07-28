@@ -54,4 +54,5 @@ az deployment sub create --location koreacentral --template-file main.bicep --qu
 
 ```powershell
 az group delete --name ***
+az group delete --name worklog-rg
 ```
