@@ -9,6 +9,7 @@ on:
 jobs:
   build-and-send:
     runs-on: ubuntu-latest
+
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -24,34 +25,44 @@ jobs:
         run: |
           pip install azure-communication-email icalendar
 
-      - name: Get modified markdown file
-        id: changed-file
+      - name: Get modified markdown files
+        id: changed-files
         run: |
           if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            file=$(find . -name "*.md" | head -n 1)
+            files=$(find . -name "*.md")
           else
-            # Adjusted for working-directory: time
-            file=$(git diff --name-only HEAD^ HEAD | grep '.*\.md$' | tail -n 1)
-          fi
-          
-          if [ -z "$file" ]; then
-            file=$(find . -name "*.md" | head -n 1)
+            files=$(git diff --name-only HEAD^ HEAD | grep '.*\.md$' || true)
           fi
 
-          echo "file=$file" >> $GITHUB_OUTPUT
-          echo "Using file: $file"
+          if [ -z "$files" ]; then
+            echo "No markdown files found."
+            exit 0
+          fi
+
+          echo "Markdown files to process:"
+          echo "$files"
+
+          echo "files<<EOF" >> $GITHUB_OUTPUT
+          echo "$files" >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
 
       - name: Debug
- 
         run: |
           pwd
           ls -R
-          python --version    
-          
+          python --version
+          echo "Files selected:"
+          echo "${{ steps.changed-files.outputs.files }}"
+
       - name: Send ICS Email
         env:
           AZURE_COMMUNICATION_CONNECTION_STRING: ${{ secrets.AZURE_COMMUNICATION_CONNECTION_STRING }}
           SENDER_EMAIL: ${{ secrets.SENDER_EMAIL }}
           RECIPIENT_EMAIL: ${{ secrets.RECIPIENT_EMAIL }}
         run: |
-          python scripts/sendEmail.py "${{ steps.changed-file.outputs.file }}"
+          while IFS= read -r file; do
+            if [ -n "$file" ]; then
+              echo "Sending ICS for: $file"
+              python scripts/sendEmail.py "$file"
+            fi
+          done <<< "${{ steps.changed-files.outputs.files }}"
