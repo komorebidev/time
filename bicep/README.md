@@ -27,6 +27,8 @@ Push work logs to calendar as ics invites using Azure resources
 ```powershell
 az login
 ```
+* The --location argument in the deployment commands are only for metadata of the logs
+* Locations defined in the code remain as is
 
 * What-if
 
