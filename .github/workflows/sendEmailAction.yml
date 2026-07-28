@@ -3,7 +3,7 @@ name: Send ICS
 on:
   push:
     paths:
-      - 'time/**/*.md'
+      - '**/*.md'
   workflow_dispatch:
 
 jobs:
@@ -31,7 +31,7 @@ jobs:
             file=$(find . -name "*.md" | head -n 1)
           else
             # Adjusted for working-directory: time
-            file=$(git diff --name-only HEAD^ HEAD | grep '^time/.*\.md$' | sed 's|^time/||' | tail -n 1)
+            file=$(git diff --name-only HEAD^ HEAD | grep '.*\.md$' | tail -n 1)
           fi
           
           if [ -z "$file" ]; then
@@ -54,4 +54,4 @@ jobs:
           SENDER_EMAIL: ${{ secrets.SENDER_EMAIL }}
           RECIPIENT_EMAIL: ${{ secrets.RECIPIENT_EMAIL }}
         run: |
-          python time/scripts/sendEmail.py "${{ steps.changed-file.outputs.file }}"
+          python scripts/sendEmail.py "${{ steps.changed-file.outputs.file }}"
