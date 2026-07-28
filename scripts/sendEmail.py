@@ -8,15 +8,25 @@ from icalendar import Calendar, Event
 
 
 def parse_checklist_log(file_content):
-    pattern = r'-\s*\[([ xX])\]\s*\*\*(\d{4}-\d{2}-\d{2})\s*\([^)]+\)\*\*:\s*(.*?)(?=\n\s*-\s*\[[ xX]\]\s*\*\*\d{4}-\d{2}-\d{2}|\Z)'
-    matches = re.findall(pattern, file_content, re.DOTALL)
+    pattern = r'-\s*\[([ xX])\]\s*\*\*(\d{4}-\d{2}-\d{2})\s*\([^)]+\)\*\*(.*?)(?=\n\s*-\s*\[[ xX]\]\s*\*\*\d{4}-\d{2}-\d{2}|\Z)'
+
+    matches = re.findall(
+        pattern,
+        file_content,
+        re.DOTALL
+    )
 
     entries = []
 
     for status, date_str, content in matches:
-        cleaned_content = content.strip()
 
-        # Convert markdown bullets into separate lines
+        raw_content = content.strip()
+
+        title = raw_content.split("\n")[0].strip()
+
+        cleaned_content = raw_content
+
+        # Convert markdown bullets into calendar-friendly lines
         cleaned_content = re.sub(
             r'\n\s*[-*]\s+',
             '\n• ',
@@ -25,8 +35,9 @@ def parse_checklist_log(file_content):
 
         entries.append({
             "date": date_str.strip(),
+            "title": title,
             "content": cleaned_content if cleaned_content else "Work log entry",
-            "completed": status.upper() == 'X'
+            "completed": status.upper() == "X"
         })
 
     return entries
@@ -34,27 +45,51 @@ def parse_checklist_log(file_content):
 
 def is_out_of_office(entry):
     """
-    Detect entries that should be marked as Outlook OOF.
+    Detect entries that should be marked as Outlook Out Of Office.
+    Checks both the heading and the work log content.
     """
-    text = entry["content"].lower()
+
+    text = (
+        entry.get("title", "")
+        + " "
+        + entry.get("content", "")
+    ).lower()
 
     keywords = [
         "day off",
-        "holiday"
+        "holiday",
+        "public holiday",
+        "annual leave",
+        "vacation",
+        "pto"
     ]
 
-    return any(keyword in text for keyword in keywords)
+    return any(
+        keyword in text
+        for keyword in keywords
+    )
 
 
 def create_ics(entries):
+
     cal = Calendar()
-    cal.add('prodid', '-//Worklog Automation//mxp//')
-    cal.add('version', '2.0')
+
+    cal.add(
+        'prodid',
+        '-//Worklog Automation//mxp//'
+    )
+
+    cal.add(
+        'version',
+        '2.0'
+    )
 
     for entry in entries:
+
         event = Event()
 
         if is_out_of_office(entry):
+
             event.add(
                 'summary',
                 "Out of Office"
@@ -73,20 +108,17 @@ def create_ics(entries):
             )
 
         else:
+
+            # Normal work logs are regular calendar events
+            # and do not affect availability
             event.add(
                 'summary',
                 f"Work Log: {entry['date']}"
             )
 
-            event.add(
-                'X-MICROSOFT-CDO-BUSYSTATUS',
-                'BUSY',
-                parameters={'VALUE': 'TEXT'}
-            )
+        description = entry["content"]
 
-        # Preserve line breaks for Outlook
-        description = entry['content']
-
+        # Ensure bullets render correctly in Outlook
         description = re.sub(
             r'\s*\*\s+',
             '\r\n• ',
@@ -105,8 +137,8 @@ def create_ics(entries):
         )
 
         d = datetime.strptime(
-            entry['date'],
-            '%Y-%m-%d'
+            entry["date"],
+            "%Y-%m-%d"
         ).date()
 
         event.add(
@@ -130,8 +162,14 @@ def create_ics(entries):
 
 
 def send_email(ics_content, file_name):
-    connection_string = os.environ["AZURE_COMMUNICATION_CONNECTION_STRING"]
-    client = EmailClient.from_connection_string(connection_string)
+
+    connection_string = os.environ[
+        "AZURE_COMMUNICATION_CONNECTION_STRING"
+    ]
+
+    client = EmailClient.from_connection_string(
+        connection_string
+    )
 
     sender_address = os.environ["SENDER_EMAIL"]
     recipient_address = os.environ["RECIPIENT_EMAIL"]
@@ -147,7 +185,10 @@ def send_email(ics_content, file_name):
         },
         "content": {
             "subject": f"Work Log ICS: {file_name}",
-            "plainText": "Attached are your calendar records parsed from your monthly markdown checklist."
+            "plainText": (
+                "Attached are your calendar records "
+                "parsed from your monthly markdown checklist."
+            )
         },
         "attachments": [
             {
@@ -192,7 +233,7 @@ if __name__ == "__main__":
 
     ics_base64 = base64.b64encode(
         ics_bytes
-    ).decode('utf-8')
+    ).decode("utf-8")
 
     send_email(
         ics_base64,
