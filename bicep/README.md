@@ -53,11 +53,15 @@ az deployment sub create --location koreacentral --template-file main.bicep --qu
 az communication email domain sender-username create --email-service-name "worklog-emailService" --domain-name "AzureManagedDomain" --resource-group "worklog-rg" --name "donotreply" --username "donotreply" --display-name "Calendar Sync"
 ```
 
-* For printing the default sender email value
+* For printing the default sender email value (look for fromSenderDomain in the output)
 
 ```powershell
-az communication email domain show --email-service-name "worklog-emailService" --resource-group "worklog-rg" --name "AzureManagedDomain" --query "mailFrom" -o tsv
+az communication email domain show --email-service-name "worklog-emailService" --resource-group "worklog-rg" --name "AzureManagedDomain"
 ```
+
+* donotreply+fromSenderDomain
+
+* i.e. donotreply@035352be-63e4-4683-9aec-58f2ca97a47a.azurecomm.net
 
 ### Warning
 
