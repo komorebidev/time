@@ -15,8 +15,10 @@ resource emailService 'Microsoft.Communication/emailServices@2023-03-31' = {
 // Provision an Azure-managed domain under the email service
 resource azureManagedDomain 'Microsoft.Communication/emailServices/domains@2023-03-31' = {
   parent: emailService
-  name: '${resourcePrefix}-azureDomain'
-  location: location
+  name: 'AzureManagedDomain'
+ // name: '${resourcePrefix}-azureDomain' //custom names are unsupported so comment out
+  
+ location: location
   properties: {
     domainManagement: 'AzureManaged'
   }
