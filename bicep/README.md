@@ -49,3 +49,9 @@ az deployment sub create --location koreacentral --template-file main.bicep --qu
 * This secret is used in Github Actions to send ics invites from Azure
 
 * If rebuilding resources, update the key in Github Actions
+
+# Cleanup
+
+```powershell
+az group delete --name ***
+```
