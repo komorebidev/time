@@ -44,6 +44,13 @@ jobs:
           echo "file=$file" >> $GITHUB_OUTPUT
           echo "Using file: $file"
 
+      - name: Debug
+ 
+        run: |
+          pwd
+          ls -R
+          python --version    
+          
       - name: Send ICS Email
         env:
           AZURE_COMMUNICATION_CONNECTION_STRING: ${{ secrets.AZURE_COMMUNICATION_CONNECTION_STRING }}
