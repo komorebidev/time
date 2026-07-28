@@ -3,7 +3,7 @@ name: Send ICS
 on:
   push:
     paths:
-      - 'log/*.md'
+      - 'time/**/*.md'
 
 jobs:
   build-and-send:
@@ -26,7 +26,7 @@ jobs:
       - name: Get modified markdown file
         id: changed-file
         run: |
-          file=$(git diff --name-only HEAD^ HEAD | grep '^log/.*\.md$' | tail -n 1)
+          file=$(git diff --name-only HEAD^ HEAD | grep '^time/.*\.md$' | tail -n 1)
           echo "file=$file" >> $GITHUB_OUTPUT
 
       - name: Send ICS Email
