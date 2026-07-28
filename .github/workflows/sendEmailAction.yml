@@ -9,9 +9,6 @@ on:
 jobs:
   build-and-send:
     runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: time  # Sets base folder so all relative paths start inside your 'time' directory
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -57,4 +54,4 @@ jobs:
           SENDER_EMAIL: ${{ secrets.SENDER_EMAIL }}
           RECIPIENT_EMAIL: ${{ secrets.RECIPIENT_EMAIL }}
         run: |
-          python scripts/sendEmail.py "${{ steps.changed-file.outputs.file }}"
+          python time/scripts/sendEmail.py "${{ steps.changed-file.outputs.file }}"
