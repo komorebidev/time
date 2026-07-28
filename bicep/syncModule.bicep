@@ -29,7 +29,7 @@ resource communicationService 'Microsoft.Communication/communicationServices@202
   name: '${resourcePrefix}-communicationService'
   location: location
   properties: {
-    dataLocation: 'Korea Central'
+    dataLocation: 'korea'
     linkedDomains: [
       azureManagedDomain.id
     ]
