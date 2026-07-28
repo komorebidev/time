@@ -46,4 +46,4 @@ jobs:
           SENDER_EMAIL: ${{ secrets.SENDER_EMAIL }}
           RECIPIENT_EMAIL: ${{ secrets.RECIPIENT_EMAIL }}
         run: |
-          python "$GITHUB_WORKSPACE/time/scripts/sendEmail.py" "${{ steps.changed-file.outputs.file }}"
+          python time/scripts/sendEmail.py "${{ steps.changed-file.outputs.file }}"
