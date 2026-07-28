@@ -33,7 +33,6 @@ jobs:
             file=$(git diff --name-only HEAD^ HEAD | grep '^time/.*\.md$' | tail -n 1)
           fi
           
-          # Fallback if no file was detected by git diff
           if [ -z "$file" ]; then
             file=$(find time -name "*.md" | head -n 1)
           fi
@@ -47,4 +46,4 @@ jobs:
           SENDER_EMAIL: ${{ secrets.SENDER_EMAIL }}
           RECIPIENT_EMAIL: ${{ secrets.RECIPIENT_EMAIL }}
         run: |
-          python time/scripts/sendEmail.py "${{ steps.changed-file.outputs.file }}"
+          python "$GITHUB_WORKSPACE/scripts/sendEmail.py" "${{ steps.changed-file.outputs.file }}"
