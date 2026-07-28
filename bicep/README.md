@@ -44,6 +44,21 @@ az deployment sub create --location koreacentral --template-file main.bicep --qu
 
 * Use the output string and paste into Github repository secrets as AZURE_COMMUNICATION_CONNECTION_STRING
 
+## Setting up default Azure sender email
+
+* Need to provision this to get the value for Github Actions
+* For setting the default sender email
+
+```powershell
+az communication email domain sender-username create --email-service-name "worklog-emailService" --domain-name "AzureManagedDomain" --resource-group "worklog-rg" --name "donotreply" --username "donotreply" --display-name "Calendar Sync"
+```
+
+* For printing the default sender email value
+
+```powershell
+az communication email domain show --email-service-name "worklog-emailService" --resource-group "worklog-rg" --name "AzureManagedDomain" --query "mailFrom" -o tsv
+```
+
 ### Warning
 
 * Destroying Azure resources and rebuilding will generate new communicationService secret
