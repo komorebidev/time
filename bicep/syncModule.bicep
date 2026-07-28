@@ -8,7 +8,7 @@ resource emailService 'Microsoft.Communication/emailServices@2023-03-31' = {
   name: '${resourcePrefix}-emailService'
   location: location
   properties: {
-    dataLocation: 'Korea Central'
+    dataLocation: 'Asia Pacific'
   }
 }
 
