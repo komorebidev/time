@@ -59,9 +59,9 @@ az communication email domain sender-username create --email-service-name "workl
 az communication email domain show --email-service-name "worklog-emailService" --resource-group "worklog-rg" --name "AzureManagedDomain"
 ```
 
-* donotreply+fromSenderDomain
+* DoNotReply+fromSenderDomain
 
-* i.e. donotreply@035352be-63e4-4683-9aec-58f2ca97a47a.azurecomm.net
+* i.e. DoNotReply@035352be-63e4-4683-9aec-58f2ca97a47a.azurecomm.net
 
 ### Warning
 
