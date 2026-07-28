@@ -1,4 +1,4 @@
 # Worklog
-A dedicated repository for recording daily tasks. This serves as a worklog.
+For recording tasks and schedule.
 
-Click on the year and corresponding month "md" file to view.
+Click on the year and corresponding month file to view.
