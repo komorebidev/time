@@ -9,12 +9,14 @@ on:
 jobs:
   build-and-send:
     runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: time  # Sets base folder so all relative paths start inside your 'time' directory
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
         with:
           fetch-depth: 2
-          path: '.'
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -29,13 +31,14 @@ jobs:
         id: changed-file
         run: |
           if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            file=$(find time -name "*.md" | head -n 1)
+            file=$(find . -name "*.md" | head -n 1)
           else
-            file=$(git diff --name-only HEAD^ HEAD | grep '^time/.*\.md$' | tail -n 1)
+            # Adjusted for working-directory: time
+            file=$(git diff --name-only HEAD^ HEAD | grep '^time/.*\.md$' | sed 's|^time/||' | tail -n 1)
           fi
           
           if [ -z "$file" ]; then
-            file=$(find time -name "*.md" | head -n 1)
+            file=$(find . -name "*.md" | head -n 1)
           fi
 
           echo "file=$file" >> $GITHUB_OUTPUT
@@ -47,4 +50,4 @@ jobs:
           SENDER_EMAIL: ${{ secrets.SENDER_EMAIL }}
           RECIPIENT_EMAIL: ${{ secrets.RECIPIENT_EMAIL }}
         run: |
-          python time/scripts/sendEmail.py "${{ steps.changed-file.outputs.file }}"
+          python scripts/sendEmail.py "${{ steps.changed-file.outputs.file }}"
