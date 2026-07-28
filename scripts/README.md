@@ -88,6 +88,8 @@ az group delete --name worklog-rg
 # Troubleshooting
 
 * To check email delivery logs, need to register this resource in Azure
+* Easiest to set the recipient as personal email because Azure subdomains can get blocked by corporate settings
+* Check spam too
 
 ```powershell
 az provider register --namespace Microsoft.Insights
