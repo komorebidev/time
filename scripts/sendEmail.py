@@ -8,7 +8,7 @@ from icalendar import Calendar, Event
 
 
 def parse_checklist_log(file_content):
-    pattern = r'-\s*\[([ xX])\]\s*\*\*(\d{4}-\d{2}-\d{2})\s*\([^)]+\)\*\*(.*?)(?=\n\s*-\s*\[[ xX]\]\s*\*\*\d{4}-\d{2}-\d{2}|\Z)'
+    pattern = r'-\s*\[([ xX])\]\s*\*\*(\d{4}-\d{2}-\d{2}\s*\([^)]+\))\*\*(.*?)(?=\n\s*-\s*\[[ xX]\]\s*\*\*\d{4}-\d{2}-\d{2}|\Z)'
 
     matches = re.findall(
         pattern,
@@ -19,12 +19,15 @@ def parse_checklist_log(file_content):
     entries = []
 
     for status, date_str, content in matches:
-
         raw_content = content.strip()
+        
+        # Split out the title line and remove any leading colons or hyphens left over from markdown
+        lines = raw_content.split("\n")
+        title = lines[0].strip().lstrip(":- ")
 
-        title = raw_content.split("\n")[0].strip()
-
-        cleaned_content = raw_content
+        # Rebuild the remaining content without the first line and clean up leading punctuation
+        body_lines = [line.strip().lstrip(":- ") for line in lines[1:] if line.strip()]
+        cleaned_content = "\n".join(body_lines)
 
         # Convert markdown bullets into calendar-friendly lines
         cleaned_content = re.sub(
@@ -33,10 +36,13 @@ def parse_checklist_log(file_content):
             cleaned_content
         )
 
+        # Extract just the YYYY-MM-DD date part from the date_str group
+        clean_date = re.search(r'\d{4}-\d{2}-\d{2}', date_str).group(0)
+
         entries.append({
-            "date": date_str.strip(),
+            "date": clean_date,
             "title": title,
-            "content": cleaned_content if cleaned_content else "Work log entry",
+            "content": cleaned_content if cleaned_content else title,
             "completed": status.upper() == "X"
         })
 
