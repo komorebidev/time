@@ -8,6 +8,7 @@ Push work logs to calendar as ics invites using Azure resources to send the emai
 * Supports multiple markdown file changes at once
 * Does not create duplicate events
 * If keywords like "Day off" are detected, it sets the day as out of office
+* Office location support (if wfh or remote is detected for that day)
 
 ## Resources
 
