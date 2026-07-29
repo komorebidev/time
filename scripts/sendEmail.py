@@ -76,6 +76,29 @@ def is_out_of_office(entry):
     )
 
 
+def is_wfh(entry):
+    """
+    Detect entries that should be marked as Working From Home (WFH).
+    """
+    text = (
+        entry.get("title", "")
+        + " "
+        + entry.get("content", "")
+    ).lower()
+
+    keywords = [
+        "wfh",
+        "remote",
+        "working from home",
+        "work from home"
+    ]
+
+    return any(
+        keyword in text
+        for keyword in keywords
+    )
+
+
 def create_ics(entries):
 
     cal = Calendar()
@@ -121,6 +144,10 @@ def create_ics(entries):
                 'summary',
                 f"Work Log: {entry['date']}"
             )
+
+            # Check if entry indicates WFH/Remote
+            if is_wfh(entry):
+                event.add('location', 'WFH')
 
         description = entry["content"]
 
