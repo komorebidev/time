@@ -20,7 +20,7 @@ def parse_checklist_log(file_content):
 
     for status, date_str, content in matches:
         raw_content = content.strip()
-        
+
         # Split out the title line and remove any leading colons or hyphens left over from markdown
         lines = raw_content.split("\n")
         title = lines[0].strip().lstrip(":- ")
@@ -99,6 +99,17 @@ def is_wfh(entry):
     )
 
 
+def is_customer_visit(entry):
+    """
+    Detect entries that should have the work location set to Customer Visit.
+    Looks only at the markdown title/header.
+    Matches both 'onsite' and 'on-site'.
+    """
+    title = entry.get("title", "")
+
+    return re.search(r"\bon-?site\b", title, re.IGNORECASE) is not None
+
+
 def create_ics(entries):
 
     cal = Calendar()
@@ -145,8 +156,10 @@ def create_ics(entries):
                 f"Work Log: {entry['date']}"
             )
 
-            # Check if entry indicates WFH/Remote
-            if is_wfh(entry):
+            # Set work location
+            if is_customer_visit(entry):
+                event.add('location', 'Customer Visit')
+            elif is_wfh(entry):
                 event.add('location', 'WFH')
 
         description = entry["content"]
