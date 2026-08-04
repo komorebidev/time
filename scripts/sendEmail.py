@@ -11,22 +11,8 @@ from icalendar import Calendar, Event
 
 
 # ======================================================================
-# Find markdown files
+# Find markdown files recursively
 # ======================================================================
-#
-# Supports:
-#
-# python scripts/sendEmail.py .
-#
-# This scans:
-#
-# .
-# ├── 2026/
-# ├── 2027/
-# └── any other folders
-#
-# ======================================================================
-
 
 def find_markdown_files(path):
 
@@ -38,6 +24,7 @@ def find_markdown_files(path):
         if path.endswith(".md"):
 
             markdown_files.append(path)
+
 
 
     elif os.path.isdir(path):
@@ -60,18 +47,11 @@ def find_markdown_files(path):
 
 
 
-# ======================================================================
-# Markdown parser
-# ======================================================================
-#
-# Reads entries like:
-#
-# - [X] **2026-08-03 (Mon)**: wfh
-#
-# * Customer onboarding
-#
-# ======================================================================
 
+
+# ======================================================================
+# Markdown checklist parser
+# ======================================================================
 
 def parse_checklist_log(file_content):
 
@@ -137,6 +117,7 @@ def parse_checklist_log(file_content):
         ).group(0)
 
 
+
         entries.append(
             {
                 "date": clean_date,
@@ -160,10 +141,47 @@ def parse_checklist_log(file_content):
 
 
 
+
+
 # ======================================================================
-# Event detection logic
+# Remove markdown syntax for iCloud titles
 # ======================================================================
 
+def clean_markdown(text):
+
+
+    # Remove bold formatting
+    text = re.sub(
+        r"\*\*(.*?)\*\*",
+        r"\1",
+        text
+    )
+
+
+    # Remove italic formatting
+    text = re.sub(
+        r"\*(.*?)\*",
+        r"\1",
+        text
+    )
+
+
+    # Remove inline code markers
+    text = text.replace(
+        "`",
+        ""
+    )
+
+
+    return text.strip()
+
+
+
+
+
+# ======================================================================
+# Event detection
+# ======================================================================
 
 def is_out_of_office(entry):
 
@@ -205,6 +223,8 @@ def is_out_of_office(entry):
 
 
 
+
+
 def is_wfh(entry):
 
     text = (
@@ -241,6 +261,8 @@ def is_wfh(entry):
 
 
 
+
+
 def is_customer_visit(entry):
 
     title = entry.get(
@@ -265,61 +287,77 @@ def is_customer_visit(entry):
 
 
 
-# ======================================================================
-# iCloud event title logic
-# ======================================================================
-#
-# iCloud receives only simple summaries.
-#
-# No work descriptions are included.
-#
-# ======================================================================
 
+
+# ======================================================================
+# iCloud calendar summary mapping
+# ======================================================================
 
 def get_icloud_summary(entry):
 
-    title = entry.get(
-        "title",
-        ""
-    ).strip()
+
+    title = clean_markdown(
+        entry.get(
+            "title",
+            ""
+        )
+    )
+
+
+    content = clean_markdown(
+        entry.get(
+            "content",
+            ""
+        )
+    )
+
+
+    combined = (
+        title
+        + " "
+        + content
+    ).lower()
+
+
+
+    # Preserve public holiday names
+    if "public holiday" in combined:
+
+        return title
+
 
 
     if is_out_of_office(entry):
 
-        if "public holiday" in title.lower():
-
-            return title
-
-
-        return "🌴 Day Off"
+        return "🌴 休み"
 
 
 
     if is_customer_visit(entry):
 
-        return "🏢 On-site"
+        return "🏢 客先"
 
 
 
     if is_wfh(entry):
 
-        return "🏠 Work From Home"
+        return "🏠 在宅"
 
 
 
-    return "💼 Office"
+    return "🏢 出社"
 
 # ======================================================================
 # Outlook ICS generation
 # ======================================================================
 #
-# Corporate work calendar.
+# Used for corporate Outlook calendar.
 #
 # Includes:
 #   - Full work descriptions
-#   - Customer notes
-#   - Locations
-#   - Microsoft Out Of Office status
+#   - Customer information
+#   - WFH / customer visit locations
+#   - Outlook Out Of Office status
 #
 # ======================================================================
 
@@ -341,6 +379,7 @@ def create_outlook_ics(entries):
     )
 
 
+
     for entry in entries:
 
 
@@ -357,7 +396,7 @@ def create_outlook_ics(entries):
             )
 
 
-            # Outlook-specific OOF status
+            # Outlook OOF availability status
 
             event.add(
                 "X-MICROSOFT-CDO-BUSYSTATUS",
@@ -387,6 +426,7 @@ def create_outlook_ics(entries):
             )
 
 
+
             if is_customer_visit(entry):
 
                 event.add(
@@ -404,7 +444,7 @@ def create_outlook_ics(entries):
 
 
 
-        # Outlook gets full task descriptions
+        # Outlook receives full descriptions
 
         description = entry["content"]
 
@@ -462,7 +502,10 @@ def create_outlook_ics(entries):
         )
 
 
+
     return cal.to_ical()
+
+
 
 
 
@@ -472,20 +515,22 @@ def create_outlook_ics(entries):
 # iCloud ICS generation
 # ======================================================================
 #
-# Personal Apple Calendar.
+# Used for Apple Calendar subscription.
 #
-# File:
+# Output:
 #
 #     docs/time.ics
 #
-# Contains only:
-#   - Event title
+#
+# Contains:
+#   - Summary
 #   - Date
 #
+#
 # Does NOT contain:
-#   - Descriptions
-#   - Customer information
-#   - Work notes
+#   - Work descriptions
+#   - Customer notes
+#   - Task details
 #
 # ======================================================================
 
@@ -508,7 +553,8 @@ def create_icloud_ics(entries):
     )
 
 
-    # Apple Calendar subscription name
+
+    # iCloud subscribed calendar name
 
     cal.add(
         "X-WR-CALNAME",
@@ -573,12 +619,16 @@ def create_icloud_ics(entries):
     return cal.to_ical()
 
 # ======================================================================
-# Outlook ICS email delivery
+# Outlook ICS email sending
 # ======================================================================
 #
-# Sends the corporate calendar ICS attachment.
+# Sends the corporate Outlook calendar.
 #
-# This is separate from iCloud.
+# Email:
+#   Subject: Work Log ICS: time
+#
+# Attachment:
+#   time.ics
 #
 # ======================================================================
 
@@ -634,8 +684,8 @@ def send_email(ics_content, file_name):
 
 
             "plainText": (
-                "Attached are your calendar records "
-                "parsed from your markdown work logs."
+                "Attached are your work calendar records "
+                "generated from markdown files."
             )
 
         },
@@ -672,42 +722,31 @@ def send_email(ics_content, file_name):
 
 
 
+
+
 # ======================================================================
 # Main execution
 # ======================================================================
 #
-# Input:
+# Run:
 #
 # python scripts/sendEmail.py .
 #
-# The dot means:
 #
-# Scan the whole repository.
+# Scans all markdown files:
 #
-# Example:
-#
-# .
-# ├── 2026/
-# │   ├── Jan.md
-# │   └── Aug.md
-# │
-# ├── 2027/
-# │   └── Jan.md
-# │
-# └── scripts/
+# 2026/
+# 2027/
+# etc.
 #
 #
-# Output:
+# Generates:
 #
-# 1. Outlook:
+# Outlook:
+#   Email -> time.ics
 #
-#    Email attachment:
-#    work-log.ics
-#
-#
-# 2. iCloud:
-#
-#    docs/time.ics
+# iCloud:
+#   docs/time.ics
 #
 # ======================================================================
 
@@ -759,7 +798,7 @@ if __name__ == "__main__":
 
 
     # --------------------------------------------------------------
-    # Parse every markdown file
+    # Parse all markdown files
     # --------------------------------------------------------------
 
     all_entries = []
@@ -801,7 +840,7 @@ if __name__ == "__main__":
 
 
     # --------------------------------------------------------------
-    # Sort all events chronologically
+    # Sort events by date
     # --------------------------------------------------------------
 
     all_entries.sort(
@@ -817,13 +856,12 @@ if __name__ == "__main__":
 
 
     # --------------------------------------------------------------
-    # Generate Outlook calendar
+    # Generate Outlook ICS
     # --------------------------------------------------------------
 
     outlook_ics = create_outlook_ics(
         all_entries
     )
-
 
 
     outlook_base64 = base64.b64encode(
@@ -834,15 +872,23 @@ if __name__ == "__main__":
 
 
 
+    # Outlook email:
+    #
+    # Subject:
+    #   Work Log ICS: time
+    #
+    # Attachment:
+    #   time.ics
+
     send_email(
         outlook_base64,
-        "work-log"
+        "time"
     )
 
 
 
     # --------------------------------------------------------------
-    # Generate iCloud calendar
+    # Generate iCloud ICS
     # --------------------------------------------------------------
 
     icloud_ics = create_icloud_ics(
