@@ -183,6 +183,31 @@ def clean_markdown(text):
 # Event detection
 # ======================================================================
 
+def is_public_holiday(entry):
+
+    text = (
+
+        entry.get("title", "")
+
+        + " "
+
+        + entry.get("content", "")
+
+    )
+
+
+    return (
+
+        "🎌" in text
+
+        or "public holiday" in text.lower()
+
+    )
+
+
+
+
+
 def is_out_of_office(entry):
 
     text = (
@@ -202,8 +227,6 @@ def is_out_of_office(entry):
 
         "holiday",
 
-        "public holiday",
-
         "annual leave",
 
         "vacation",
@@ -213,11 +236,17 @@ def is_out_of_office(entry):
     ]
 
 
-    return any(
+    return (
 
-        keyword in text
+        is_public_holiday(entry)
 
-        for keyword in keywords
+        or any(
+
+            keyword in text
+
+            for keyword in keywords
+
+        )
 
     )
 
@@ -285,10 +314,6 @@ def is_customer_visit(entry):
 
     )
 
-
-
-
-
 # ======================================================================
 # iCloud calendar summary mapping
 # ======================================================================
@@ -321,7 +346,7 @@ def get_icloud_summary(entry):
 
 
     # Preserve public holiday names
-    if "public holiday" in combined:
+    if is_public_holiday(entry):
 
         return title
 
@@ -346,6 +371,8 @@ def get_icloud_summary(entry):
 
 
     return "🏢 出社"
+
+
 
 # ======================================================================
 # Outlook ICS generation
@@ -505,12 +532,6 @@ def create_outlook_ics(entries):
 
     return cal.to_ical()
 
-
-
-
-
-
-
 # ======================================================================
 # iCloud ICS generation
 # ======================================================================
@@ -618,6 +639,8 @@ def create_icloud_ics(entries):
 
     return cal.to_ical()
 
+
+
 # ======================================================================
 # Outlook ICS email sending
 # ======================================================================
@@ -718,13 +741,7 @@ def send_email(ics_content, file_name):
         f"Email send result: {poller.result()}"
     )
 
-
-
-
-
-
-
-# ======================================================================
+    # ======================================================================
 # Main execution
 # ======================================================================
 #
