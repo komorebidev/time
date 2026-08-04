@@ -9,6 +9,12 @@ Push work logs to calendar as ics invites using Azure resources to send the emai
 * Does not create duplicate events
 * If keywords like "Day off" are detected, it sets the day as out of office
 * Office location support (if wfh or remote is detected for that day)
+* Update all calendar entries logic when making script changes
+* Generates a static ics hosted on Github pages (docs folder) that can be subscribed to by iCloud (showing day offs, etc. only)
+
+## iCloud Calendar subscription URL 
+
+* https://YOUR_USERNAME.github.io/time/time.ics
 
 ## Resources
 
