@@ -4,65 +4,137 @@ on:
   push:
     paths:
       - '**/*.md'
+      - 'scripts/**/*.py'
+
   workflow_dispatch:
 
+
+permissions:
+  contents: write
+
+
 jobs:
+
   build-and-send:
+
     runs-on: ubuntu-latest
 
+
     steps:
+
+      # --------------------------------------------------------------
+      # Checkout repository
+      # --------------------------------------------------------------
+
       - name: Checkout code
         uses: actions/checkout@v4
         with:
           fetch-depth: 2
+
+
+
+      # --------------------------------------------------------------
+      # Setup Python
+      # --------------------------------------------------------------
 
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: '3.10'
 
+
+
+      # --------------------------------------------------------------
+      # Install dependencies
+      # --------------------------------------------------------------
+
       - name: Install dependencies
         run: |
           pip install azure-communication-email icalendar
 
-      - name: Get modified markdown files
-        id: changed-files
-        run: |
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            files=$(find . -name "*.md")
-          else
-            files=$(git diff --name-only HEAD^ HEAD | grep '.*\.md$' || true)
-          fi
 
-          if [ -z "$files" ]; then
-            echo "No markdown files found."
-            exit 0
-          fi
 
-          echo "Markdown files to process:"
-          echo "$files"
-
-          echo "files<<EOF" >> $GITHUB_OUTPUT
-          echo "$files" >> $GITHUB_OUTPUT
-          echo "EOF" >> $GITHUB_OUTPUT
+      # --------------------------------------------------------------
+      # Debug repository contents
+      # --------------------------------------------------------------
 
       - name: Debug
         run: |
           pwd
           ls -R
           python --version
-          echo "Files selected:"
-          echo "${{ steps.changed-files.outputs.files }}"
 
-      - name: Send ICS Email
+
+
+      # --------------------------------------------------------------
+      # Generate calendars
+      #
+      # The Python script scans the entire repository:
+      #
+      #   .
+      #   ├── 2026/
+      #   ├── 2027/
+      #   └── other markdown folders
+      #
+      # It creates:
+      #
+      #   Outlook ICS -> emailed
+      #
+      #   docs/time.ics -> GitHub Pages -> iCloud
+      #
+      # --------------------------------------------------------------
+
+      - name: Generate calendars and send Outlook ICS
+
         env:
+
           AZURE_COMMUNICATION_CONNECTION_STRING: ${{ secrets.AZURE_COMMUNICATION_CONNECTION_STRING }}
+
           SENDER_EMAIL: ${{ secrets.SENDER_EMAIL }}
+
           RECIPIENT_EMAIL: ${{ secrets.RECIPIENT_EMAIL }}
+
+
         run: |
-          while IFS= read -r file; do
-            if [ -n "$file" ]; then
-              echo "Sending ICS for: $file"
-              python scripts/sendEmail.py "$file"
-            fi
-          done <<< "${{ steps.changed-files.outputs.files }}"
+
+          python scripts/sendEmail.py .
+
+
+
+      # --------------------------------------------------------------
+      # Commit iCloud calendar feed
+      #
+      # Generated file:
+      #
+      #   docs/time.ics
+      #
+      # --------------------------------------------------------------
+
+      - name: Commit iCloud calendar feed
+
+        run: |
+
+          if [ -f "docs/time.ics" ]; then
+
+
+            git config user.name "github-actions[bot]"
+
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+
+            git add docs/time.ics
+
+
+            git commit -m "Update iCloud calendar feed" || echo "No changes"
+
+
+            git push
+
+
+          else
+
+            echo "docs/time.ics was not generated."
+
+            exit 1
+
+          fi

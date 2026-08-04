@@ -2,13 +2,85 @@ import os
 import sys
 import re
 import base64
-from datetime import datetime
+
+from datetime import datetime, timedelta
+
 from azure.communication.email import EmailClient
 from icalendar import Calendar, Event
 
 
+
+# ======================================================================
+# Find markdown files
+# ======================================================================
+#
+# Supports:
+#
+# python scripts/sendEmail.py .
+#
+# This scans:
+#
+# .
+# ├── 2026/
+# ├── 2027/
+# └── any other folders
+#
+# ======================================================================
+
+
+def find_markdown_files(path):
+
+    markdown_files = []
+
+
+    if os.path.isfile(path):
+
+        if path.endswith(".md"):
+
+            markdown_files.append(path)
+
+
+    elif os.path.isdir(path):
+
+        for root, dirs, files in os.walk(path):
+
+            for file in files:
+
+                if file.endswith(".md"):
+
+                    markdown_files.append(
+                        os.path.join(
+                            root,
+                            file
+                        )
+                    )
+
+
+    return markdown_files
+
+
+
+# ======================================================================
+# Markdown parser
+# ======================================================================
+#
+# Reads entries like:
+#
+# - [X] **2026-08-03 (Mon)**: wfh
+#
+# * Customer onboarding
+#
+# ======================================================================
+
+
 def parse_checklist_log(file_content):
-    pattern = r'-\s*\[([ xX])\]\s*\*\*(\d{4}-\d{2}-\d{2}\s*\([^)]+\))\*\*(.*?)(?=\n\s*-\s*\[[ xX]\]\s*\*\*\d{4}-\d{2}-\d{2}|\Z)'
+
+    pattern = (
+        r'-\s*\[([ xX])\]\s*'
+        r'\*\*(\d{4}-\d{2}-\d{2}\s*\([^)]+\))\*\*'
+        r'(.*?)(?=\n\s*-\s*\[[ xX]\]\s*\*\*\d{4}-\d{2}-\d{2}|\Z)'
+    )
+
 
     matches = re.findall(
         pattern,
@@ -16,272 +88,787 @@ def parse_checklist_log(file_content):
         re.DOTALL
     )
 
+
     entries = []
 
+
     for status, date_str, content in matches:
+
+
         raw_content = content.strip()
 
-        # Split out the title line and remove any leading colons or hyphens left over from markdown
+
         lines = raw_content.split("\n")
-        title = lines[0].strip().lstrip(":- ")
 
-        # Rebuild the remaining content without the first line and clean up leading punctuation
-        body_lines = [line.strip().lstrip(":- ") for line in lines[1:] if line.strip()]
-        cleaned_content = "\n".join(body_lines)
 
-        # Convert markdown bullets into calendar-friendly lines
+        title = (
+            lines[0]
+            .strip()
+            .lstrip(":- ")
+        )
+
+
+        body_lines = [
+
+            line.strip().lstrip(":- ")
+
+            for line in lines[1:]
+
+            if line.strip()
+
+        ]
+
+
+        cleaned_content = "\n".join(
+            body_lines
+        )
+
+
         cleaned_content = re.sub(
             r'\n\s*[-*]\s+',
             '\n• ',
             cleaned_content
         )
 
-        # Extract just the YYYY-MM-DD date part from the date_str group
-        clean_date = re.search(r'\d{4}-\d{2}-\d{2}', date_str).group(0)
 
-        entries.append({
-            "date": clean_date,
-            "title": title,
-            "content": cleaned_content if cleaned_content else title,
-            "completed": status.upper() == "X"
-        })
+        clean_date = re.search(
+            r'\d{4}-\d{2}-\d{2}',
+            date_str
+        ).group(0)
+
+
+        entries.append(
+            {
+                "date": clean_date,
+
+                "title": title,
+
+                "content": (
+                    cleaned_content
+                    if cleaned_content
+                    else title
+                ),
+
+                "completed": (
+                    status.upper() == "X"
+                )
+            }
+        )
+
 
     return entries
 
 
+
+# ======================================================================
+# Event detection logic
+# ======================================================================
+
+
 def is_out_of_office(entry):
-    """
-    Detect entries that should be marked as Outlook Out Of Office.
-    Checks both the heading and the work log content.
-    """
 
     text = (
+
         entry.get("title", "")
+
         + " "
+
         + entry.get("content", "")
+
     ).lower()
 
+
     keywords = [
+
         "day off",
+
         "holiday",
+
         "public holiday",
+
         "annual leave",
+
         "vacation",
+
         "pto"
+
     ]
 
+
     return any(
+
         keyword in text
+
         for keyword in keywords
+
     )
+
 
 
 def is_wfh(entry):
-    """
-    Detect entries that should be marked as Working From Home (WFH).
-    """
+
     text = (
+
         entry.get("title", "")
+
         + " "
+
         + entry.get("content", "")
+
     ).lower()
 
+
     keywords = [
+
         "wfh",
+
         "remote",
+
         "working from home",
+
         "work from home"
+
     ]
 
+
     return any(
+
         keyword in text
+
         for keyword in keywords
+
     )
+
 
 
 def is_customer_visit(entry):
-    """
-    Detect entries that should have the work location set to Customer Visit.
-    Looks only at the markdown title/header.
-    Matches both 'onsite' and 'on-site'.
-    """
-    title = entry.get("title", "")
 
-    return re.search(r"\bon-?site\b", title, re.IGNORECASE) is not None
+    title = entry.get(
+        "title",
+        ""
+    )
 
 
-def create_ics(entries):
+    return (
+
+        re.search(
+            r"\bon-?site\b",
+            title,
+            re.IGNORECASE
+        )
+
+        is not None
+
+        or "onsite" in title.lower()
+
+    )
+
+
+
+# ======================================================================
+# iCloud event title logic
+# ======================================================================
+#
+# iCloud receives only simple summaries.
+#
+# No work descriptions are included.
+#
+# ======================================================================
+
+
+def get_icloud_summary(entry):
+
+    title = entry.get(
+        "title",
+        ""
+    ).strip()
+
+
+    if is_out_of_office(entry):
+
+        if "public holiday" in title.lower():
+
+            return title
+
+
+        return "🌴 Day Off"
+
+
+
+    if is_customer_visit(entry):
+
+        return "🏢 On-site"
+
+
+
+    if is_wfh(entry):
+
+        return "🏠 Work From Home"
+
+
+
+    return "💼 Office"
+
+# ======================================================================
+# Outlook ICS generation
+# ======================================================================
+#
+# Corporate work calendar.
+#
+# Includes:
+#   - Full work descriptions
+#   - Customer notes
+#   - Locations
+#   - Microsoft Out Of Office status
+#
+# ======================================================================
+
+
+def create_outlook_ics(entries):
 
     cal = Calendar()
 
-    cal.add(
-        'prodid',
-        '-//Worklog Automation//mxp//'
-    )
 
     cal.add(
-        'version',
-        '2.0'
+        "prodid",
+        "-//Worklog Automation//mxp//"
     )
+
+
+    cal.add(
+        "version",
+        "2.0"
+    )
+
 
     for entry in entries:
 
+
         event = Event()
+
+
 
         if is_out_of_office(entry):
 
+
             event.add(
-                'summary',
+                "summary",
                 "Out of Office"
             )
 
-            event.add(
-                'X-MICROSOFT-CDO-BUSYSTATUS',
-                'OOF',
-                parameters={'VALUE': 'TEXT'}
-            )
+
+            # Outlook-specific OOF status
 
             event.add(
-                'X-MICROSOFT-CDO-INTENDEDSTATUS',
-                'OOF',
-                parameters={'VALUE': 'TEXT'}
+                "X-MICROSOFT-CDO-BUSYSTATUS",
+                "OOF",
+                parameters={
+                    "VALUE": "TEXT"
+                }
             )
+
+
+            event.add(
+                "X-MICROSOFT-CDO-INTENDEDSTATUS",
+                "OOF",
+                parameters={
+                    "VALUE": "TEXT"
+                }
+            )
+
+
 
         else:
 
-            # Normal work logs are regular calendar events
-            # and do not affect availability
+
             event.add(
-                'summary',
+                "summary",
                 f"Work Log: {entry['date']}"
             )
 
-            # Set work location
+
             if is_customer_visit(entry):
-                event.add('location', 'Customer Visit')
+
+                event.add(
+                    "location",
+                    "Customer Visit"
+                )
+
+
             elif is_wfh(entry):
-                event.add('location', 'WFH')
+
+                event.add(
+                    "location",
+                    "WFH"
+                )
+
+
+
+        # Outlook gets full task descriptions
 
         description = entry["content"]
 
-        # Ensure bullets render correctly in Outlook
+
         description = re.sub(
-            r'\s*\*\s+',
-            '\r\n• ',
+            r"\s*\*\s+",
+            "\r\n• ",
             description
         )
 
+
         description = re.sub(
-            r'\s*-\s+',
-            '\r\n• ',
+            r"\s*-\s+",
+            "\r\n• ",
             description
         )
+
 
         event.add(
-            'description',
+            "description",
             description
         )
+
+
 
         d = datetime.strptime(
             entry["date"],
             "%Y-%m-%d"
         ).date()
 
+
+
         event.add(
-            'dtstart',
+            "dtstart",
             d
         )
 
-        event.add(
-            'dtend',
-            d
-        )
 
         event.add(
-            'uid',
-            f"worklog-{entry['date']}@worklog.automation"
+            "dtend",
+            d + timedelta(days=1)
         )
 
-        cal.add_component(event)
+
+
+        event.add(
+            "uid",
+            f"outlook-{entry['date']}@worklog"
+        )
+
+
+
+        cal.add_component(
+            event
+        )
+
 
     return cal.to_ical()
 
 
+
+
+
+# ======================================================================
+# iCloud ICS generation
+# ======================================================================
+#
+# Personal Apple Calendar.
+#
+# File:
+#
+#     docs/time.ics
+#
+# Contains only:
+#   - Event title
+#   - Date
+#
+# Does NOT contain:
+#   - Descriptions
+#   - Customer information
+#   - Work notes
+#
+# ======================================================================
+
+
+def create_icloud_ics(entries):
+
+    cal = Calendar()
+
+
+
+    cal.add(
+        "prodid",
+        "-//Worklog Automation iCloud//mxp//"
+    )
+
+
+    cal.add(
+        "version",
+        "2.0"
+    )
+
+
+    # Apple Calendar subscription name
+
+    cal.add(
+        "X-WR-CALNAME",
+        "仕事"
+    )
+
+
+    cal.add(
+        "X-WR-CALDESC",
+        "自動生成された勤務予定"
+    )
+
+
+
+    for entry in entries:
+
+
+        event = Event()
+
+
+
+        event.add(
+            "summary",
+            get_icloud_summary(entry)
+        )
+
+
+
+        d = datetime.strptime(
+            entry["date"],
+            "%Y-%m-%d"
+        ).date()
+
+
+
+        event.add(
+            "dtstart",
+            d
+        )
+
+
+        event.add(
+            "dtend",
+            d + timedelta(days=1)
+        )
+
+
+
+        event.add(
+            "uid",
+            f"icloud-{entry['date']}@worklog"
+        )
+
+
+
+        cal.add_component(
+            event
+        )
+
+
+
+    return cal.to_ical()
+
+# ======================================================================
+# Outlook ICS email delivery
+# ======================================================================
+#
+# Sends the corporate calendar ICS attachment.
+#
+# This is separate from iCloud.
+#
+# ======================================================================
+
+
 def send_email(ics_content, file_name):
+
 
     connection_string = os.environ[
         "AZURE_COMMUNICATION_CONNECTION_STRING"
     ]
 
+
     client = EmailClient.from_connection_string(
         connection_string
     )
 
-    sender_address = os.environ["SENDER_EMAIL"]
-    recipient_address = os.environ["RECIPIENT_EMAIL"]
+
+    sender_address = os.environ[
+        "SENDER_EMAIL"
+    ]
+
+
+    recipient_address = os.environ[
+        "RECIPIENT_EMAIL"
+    ]
+
+
 
     message = {
+
+
         "senderAddress": sender_address,
+
+
         "recipients": {
+
             "to": [
+
                 {
                     "address": recipient_address
                 }
+
             ]
+
         },
+
+
         "content": {
-            "subject": f"Work Log ICS: {file_name}",
+
+            "subject": (
+                f"Work Log ICS: {file_name}"
+            ),
+
+
             "plainText": (
                 "Attached are your calendar records "
-                "parsed from your monthly markdown checklist."
+                "parsed from your markdown work logs."
             )
+
         },
+
+
         "attachments": [
+
             {
+
                 "name": f"{file_name}.ics",
+
                 "contentType": "text/calendar",
+
                 "contentInBase64": ics_content
+
             }
+
         ]
+
     }
 
-    poller = client.begin_send(message)
+
+
+    poller = client.begin_send(
+        message
+    )
+
 
     print(
         f"Email send result: {poller.result()}"
     )
 
 
+
+
+
+# ======================================================================
+# Main execution
+# ======================================================================
+#
+# Input:
+#
+# python scripts/sendEmail.py .
+#
+# The dot means:
+#
+# Scan the whole repository.
+#
+# Example:
+#
+# .
+# ├── 2026/
+# │   ├── Jan.md
+# │   └── Aug.md
+# │
+# ├── 2027/
+# │   └── Jan.md
+# │
+# └── scripts/
+#
+#
+# Output:
+#
+# 1. Outlook:
+#
+#    Email attachment:
+#    work-log.ics
+#
+#
+# 2. iCloud:
+#
+#    docs/time.ics
+#
+# ======================================================================
+
+
 if __name__ == "__main__":
 
-    file_path = sys.argv[1]
 
-    file_name = os.path.splitext(
-        os.path.basename(file_path)
-    )[0]
+    if len(sys.argv) < 2:
 
-    with open(
-        file_path,
-        "r",
-        encoding="utf-8"
-    ) as f:
-        content = f.read()
-
-    entries = parse_checklist_log(content)
-
-    if not entries:
         print(
-            "No valid checklist dates found in the markdown file."
+            "Usage: python sendEmail.py <file-or-folder>"
         )
+
+        sys.exit(1)
+
+
+
+    input_path = sys.argv[1]
+
+
+
+    markdown_files = find_markdown_files(
+        input_path
+    )
+
+
+
+    if not markdown_files:
+
+        print(
+            "No markdown files found."
+        )
+
         sys.exit(0)
 
-    ics_bytes = create_ics(entries)
 
-    ics_base64 = base64.b64encode(
-        ics_bytes
-    ).decode("utf-8")
+
+    print(
+        "Markdown files discovered:"
+    )
+
+
+    for file in markdown_files:
+
+        print(
+            f" - {file}"
+        )
+
+
+
+    # --------------------------------------------------------------
+    # Parse every markdown file
+    # --------------------------------------------------------------
+
+    all_entries = []
+
+
+
+    for file in markdown_files:
+
+
+        with open(
+            file,
+            "r",
+            encoding="utf-8"
+        ) as f:
+
+            content = f.read()
+
+
+
+        entries = parse_checklist_log(
+            content
+        )
+
+
+        all_entries.extend(
+            entries
+        )
+
+
+
+    if not all_entries:
+
+        print(
+            "No calendar entries found."
+        )
+
+        sys.exit(0)
+
+
+
+    # --------------------------------------------------------------
+    # Sort all events chronologically
+    # --------------------------------------------------------------
+
+    all_entries.sort(
+        key=lambda x: x["date"]
+    )
+
+
+
+    print(
+        f"Total calendar entries: {len(all_entries)}"
+    )
+
+
+
+    # --------------------------------------------------------------
+    # Generate Outlook calendar
+    # --------------------------------------------------------------
+
+    outlook_ics = create_outlook_ics(
+        all_entries
+    )
+
+
+
+    outlook_base64 = base64.b64encode(
+        outlook_ics
+    ).decode(
+        "utf-8"
+    )
+
+
 
     send_email(
-        ics_base64,
-        file_name
+        outlook_base64,
+        "work-log"
+    )
+
+
+
+    # --------------------------------------------------------------
+    # Generate iCloud calendar
+    # --------------------------------------------------------------
+
+    icloud_ics = create_icloud_ics(
+        all_entries
+    )
+
+
+
+    os.makedirs(
+        "docs",
+        exist_ok=True
+    )
+
+
+
+    with open(
+        "docs/time.ics",
+        "wb"
+    ) as f:
+
+        f.write(
+            icloud_ics
+        )
+
+
+
+    print(
+        "Created iCloud calendar feed: docs/time.ics"
     )
