@@ -7,7 +7,7 @@
 #   - Work Log ICS emails
 #   - time.ics attachments
 #   - Multiple VEVENT entries
-#   - Duplicate prevention
+#   - Advanced duplicate prevention (UID + Subject/Date fallback)
 #   - Calendar updates
 #   - Background COM instantiation (completely avoids UI popups)
 #   - Deleting older matching emails
@@ -198,13 +198,15 @@ function Read-IcsEvents {
 }
 
 # ============================================================
-# FIND EXISTING WORKLOG EVENT
+# FIND EXISTING WORKLOG EVENT (ENHANCED DEDUPLICATION)
 # ============================================================
 
 function Find-ExistingWorklogEvent {
     param(
         $Calendar,
-        [string]$UID
+        [string]$UID,
+        [string]$Summary,
+        [datetime]$Start
     )
 
     $items = $null
@@ -223,20 +225,26 @@ function Find-ExistingWorklogEvent {
                     continue
                 }
 
+                # 1. Check via WorklogUID property first
                 $property = $null
-
                 try {
                     $property = $item.UserProperties.Find("WorklogUID")
-
-                    if ($null -ne $property) {
-                        if ($property.Value -eq $UID) {
-                            return $item
-                        }
+                    if ($null -ne $property -and $property.Value -eq $UID) {
+                        return $item
                     }
                 }
                 finally {
                     if ($property) {
                         [Runtime.InteropServices.Marshal]::ReleaseComObject($property) | Out-Null
+                    }
+                }
+
+                # 2. Fallback check via Subject + Start Date to catch legacy/un-tagged duplicates
+                if ($item.Subject -eq $Summary) {
+                    $itemStart = [datetime]$item.Start
+                    # Compare date portions to safely match all-day or timed events
+                    if ($itemStart.Date -eq $Start.Date) {
+                        return $item
                     }
                 }
             }
@@ -493,8 +501,8 @@ try {
         Write-Host "UID:"
         Write-Host $uid
 
-        # LOOK FOR EXISTING EVENT
-        $existing = Find-ExistingWorklogEvent -Calendar $calendar -UID $uid
+        # LOOK FOR EXISTING EVENT (WITH SUBJECT + DATE FALLBACK)
+        $existing = Find-ExistingWorklogEvent -Calendar $calendar -UID $uid -Summary $summary -Start $start
 
         # CREATE EVENT
         if ($null -eq $existing) {
