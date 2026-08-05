@@ -58,7 +58,7 @@ function Connect-Outlook {
 }
 
 # ============================================================
-# ENSURE OUTLOOK RULE EXISTS
+# ENSURE OUTLOOK RULE EXISTS (FIXED COM COLLECTION HANDLING)
 # ============================================================
 
 function Ensure-OutlookRule {
@@ -100,7 +100,8 @@ function Ensure-OutlookRule {
         if (-not $ruleExists) {
             Write-Host "Creating Outlook rule: '$RuleName'..."
             
-            $newRule = $rules.Add($RuleName, 0)
+            # Use explicit invocation on Rules collection to safely resolve dispatch method overload
+            $newRule = [Microsoft.Office.Interop.Outlook.Rules].InvokeMethod("Add", $rules, @($RuleName, 0))
             
             $categoryCondition = $newRule.Conditions.Category
             $categoryCondition.Enabled = $true
@@ -439,7 +440,6 @@ finally {
     Write-Host "FINISHED. Created: $createdCount | Skipped: $skippedCount"
     Write-Host "========================================"
 
-    # 5-SECOND TIMEOUT EXIT WITH KEYPRESS DETECTION
     Write-Host "Closing in 5 seconds... Press any key to stay open."
     
     $sw = [Diagnostics.Stopwatch]::StartNew()
