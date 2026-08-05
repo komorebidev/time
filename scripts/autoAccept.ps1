@@ -11,7 +11,7 @@
 #   - Calendar updates
 #   - Background COM instantiation (completely avoids UI popups)
 #   - Deleting older matching emails
-#   - Deleting the newest imported email reliably via EntryID (even if 0 items imported/changed)
+#   - Deleting the newest imported email reliably via Move to Deleted Items (even if 0 items imported/changed)
 #   - Safe process cleanup upon completion
 #
 # ============================================================
@@ -566,22 +566,25 @@ try {
         }
     }
 
-    # DELETE THE NEWEST IMPORTED EMAIL VIA ENTRY ID (RUNS REGARDLESS OF CREATION COUNT)
+    # MOVE THE NEWEST PROCESSED EMAIL TO DELETED ITEMS FOLDER VIA ENTRY ID (RUNS REGARDLESS OF CHANGES)
     Write-Host ""
     Write-Host "Cleaning up newest processed email..."
     try {
         $mailToDelete = $inbox.Items.Find("[EntryID] = '$targetEntryID'")
         if ($null -ne $mailToDelete) {
-            $mailToDelete.Delete()
+            $deletedItemsFolder = $namespace.GetDefaultFolder(3)
+            $mailToDelete.Move($deletedItemsFolder)
+            
+            [Runtime.InteropServices.Marshal]::ReleaseComObject($deletedItemsFolder) | Out-Null
             [Runtime.InteropServices.Marshal]::ReleaseComObject($mailToDelete) | Out-Null
-            Write-Host "✓ Email deleted successfully"
+            Write-Host "✓ Email moved to Deleted Items successfully"
         }
         else {
             Write-Host "Warning: Email already removed or not found by EntryID."
         }
     }
     catch {
-        Write-Host "Warning: Could not delete the email: $_"
+        Write-Host "Warning: Could not move email to deleted items: $_"
     }
 
 }
