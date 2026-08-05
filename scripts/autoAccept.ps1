@@ -498,158 +498,225 @@ try {
     Write-Host "Calendar:"
     Write-Host $calendar.FolderPath
 
-        # ========================================================
-    # SEARCH INBOX
-    #
-    # We search for "Work Log ICS:" anywhere in the subject.
-    #
-    # This catches:
-    #
-    # Work Log ICS: time
-    # FW: Work Log ICS: time
-    # RE: Work Log ICS: time
-    #
-    # We ALSO require a time.ics attachment.
-    #
-    # NEW:
-    # Emails already marked with the Outlook category
-    # "WorkLog Imported" are ignored.
-    # ========================================================
-
-    Write-Host ""
-
-    Write-Host "Searching Inbox for Work Log ICS email..."
-
-    $mailItems = $inbox.Items
+# SEARCH INBOX
+#
+# We search for:
+#
+#   Subject contains "Work Log ICS:"
+#   Attachment = time.ics
+#
+# If multiple matching emails exist:
+#
+#   - Newest email is imported
+#   - Older matching emails are deleted
+#   - Previously processed emails are deleted
+#
+# This prevents scheduled runs from repeatedly importing
+# old ICS attachments.
+# ========================================================
 
 
-    # Newest first
+Write-Host ""
 
-    $mailItems.Sort(
-        "[ReceivedTime]",
-        $true
-    )
+Write-Host "Searching Inbox for Work Log ICS emails..."
 
 
-    foreach ($mail in $mailItems) {
+$mailItems = $inbox.Items
 
 
-        # 43 = Outlook MailItem
+# Newest first
 
-        if ($mail.Class -ne 43) {
+$mailItems.Sort(
+    "[ReceivedTime]",
+    $true
+)
 
-            continue
-        }
 
 
-        $subject = [string]$mail.Subject
+# --------------------------------------------------------
+# Collect all matching Work Log emails
+# --------------------------------------------------------
+
+$matchingMails = @()
+
+
+foreach ($mail in $mailItems) {
+
+
+    # 43 = Outlook MailItem
+
+    if ($mail.Class -ne 43) {
+
+        continue
+    }
+
+
+    $subject = [string]$mail.Subject
+
+
+    if (
+        $subject -notlike "*$SubjectSearch*"
+    ) {
+
+        continue
+    }
+
+
+    $foundAttachment = $false
+
+
+    for (
+        $i = 1;
+        $i -le $mail.Attachments.Count;
+        $i++
+    ) {
+
+        $attachment =
+            $mail.Attachments.Item($i)
 
 
         if (
-            $subject -notlike "*$SubjectSearch*"
+            $attachment.FileName -ieq $AttachmentName
         ) {
 
-            continue
-        }
-
-
-        # ----------------------------------------------------
-        # NEW:
-        # Skip emails already successfully imported.
-        #
-        # The category is added only after the entire import
-        # succeeds, so failed imports remain retryable.
-        # ----------------------------------------------------
-
-        if (
-            $mail.Categories -and
-            $mail.Categories -match "(^|,\s*)$([regex]::Escape($ProcessedCategory))(,|$)"
-        ) {
-
-            Write-Host ""
-            Write-Host "Skipping already processed email:"
-            Write-Host "  $subject"
-
-            continue
-        }
-
-
-
-        # ----------------------------------------------------
-        # Look specifically for time.ics
-        # ----------------------------------------------------
-
-        for (
-            $i = 1;
-            $i -le $mail.Attachments.Count;
-            $i++
-        ) {
-
-            $attachment =
-                $mail.Attachments.Item($i)
-
-
-            if (
-                $attachment.FileName -ieq
-                $AttachmentName
-            ) {
-
-                $targetMail = $mail
-
-                $icsAttachment = $attachment
-
-                break
-            }
-        }
-
-
-        if ($null -ne $targetMail) {
+            $foundAttachment = $true
 
             break
         }
     }
 
 
+    if ($foundAttachment) {
 
-    # ========================================================
-    # EMAIL NOT FOUND
-    # ========================================================
-
-    if ($null -eq $targetMail) {
-
-        Write-Host ""
-
-        Write-Host "No matching Work Log ICS email found."
-
-        Write-Host ""
-        Write-Host "Expected a message containing:"
-        Write-Host "  Subject: *Work Log ICS:*"
-        Write-Host "  Attachment: time.ics"
-
-        exit 0
+        $matchingMails += $mail
     }
+}
 
 
 
-    # ========================================================
-    # EMAIL FOUND
-    # ========================================================
+# ========================================================
+# NO EMAILS FOUND
+# ========================================================
+
+if ($matchingMails.Count -eq 0) {
 
     Write-Host ""
 
-    Write-Host "✓ Work Log email found"
+    Write-Host "No matching Work Log ICS email found."
 
-    Write-Host "  Subject:"
-    Write-Host "    $($targetMail.Subject)"
-
-    Write-Host "  Received:"
-    Write-Host "    $($targetMail.ReceivedTime)"
-
-    Write-Host "  Attachment:"
-    Write-Host "    $($icsAttachment.FileName)"
+    exit 0
+}
 
 
 
+# ========================================================
+# SORT NEWEST FIRST
+# ========================================================
+
+$matchingMails =
+    $matchingMails |
+    Sort-Object ReceivedTime -Descending
+
+
+
+# ========================================================
+# KEEP ONLY THE NEWEST EMAIL
+# ========================================================
+
+$targetMail =
+    $matchingMails[0]
+
+
+
+Write-Host ""
+
+Write-Host "Newest Work Log email selected:"
+
+Write-Host "  Subject:"
+Write-Host "    $($targetMail.Subject)"
+
+Write-Host "  Received:"
+Write-Host "    $($targetMail.ReceivedTime)"
+
+
+
+# ========================================================
+# DELETE ALL OLDER MATCHING EMAILS
+#
+# The newest email is kept.
+# Everything else is removed.
+# ========================================================
+
+if ($matchingMails.Count -gt 1) {
+
+
+    for (
+        $i = 1;
+        $i -lt $matchingMails.Count;
+        $i++
+    ) {
+
+
+        $oldMail =
+            $matchingMails[$i]
+
+
+        Write-Host ""
+
+        Write-Host "Deleting older Work Log email:"
+
+        Write-Host "  $($oldMail.Subject)"
+
+        Write-Host "  $($oldMail.ReceivedTime)"
+
+
+        $oldMail.Delete()
+    }
+}
+
+
+
+# ========================================================
+# GET THE ICS ATTACHMENT FROM THE SELECTED EMAIL
+# ========================================================
+
+for (
+    $i = 1;
+    $i -le $targetMail.Attachments.Count;
+    $i++
+) {
+
+
+    $attachment =
+        $targetMail.Attachments.Item($i)
+
+
+    if (
+        $attachment.FileName -ieq $AttachmentName
+    ) {
+
+        $icsAttachment = $attachment
+
+        break
+    }
+}
+
+
+
+if ($null -eq $icsAttachment) {
+
+    throw "Selected Work Log email does not contain time.ics"
+}
+
+
+
+Write-Host ""
+
+Write-Host "✓ Work Log email selected"
+
+Write-Host "  Attachment:"
+Write-Host "    $($icsAttachment.FileName)"
+    
     # ========================================================
     # SAVE ICS
     # ========================================================
