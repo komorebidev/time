@@ -1,7 +1,7 @@
 # ============================================================
-# Worklog ICS -> Outlook Calendar (Stealth / Hidden Mode)
+# Worklog ICS -> Outlook Calendar (Pure COM / Completely Silent)
 #
-# Uses classic Outlook COM/MAPI.
+# Uses classic Outlook COM/MAPI without spawning an interactive process.
 #
 # Handles:
 #   - Work Log ICS emails
@@ -9,30 +9,12 @@
 #   - Multiple VEVENT entries
 #   - Duplicate prevention
 #   - Calendar updates
-#   - Outlook startup timing problems
-#   - Outlook run completely hidden via Win32 API
-#   - Safe Outlook shutdown upon completion
+#   - Background COM instantiation (completely avoids UI popups)
+#   - Safe process cleanup upon completion
 #
 # ============================================================
 
 $ErrorActionPreference = "Stop"
-
-# ============================================================
-# WIN32 API FOR FORCED WINDOW HIDING
-# ============================================================
-
-$definition = @'
-using System;
-using System.Runtime.InteropServices;
-
-public class WindowHelper {
-    [DllImport("user32.dll")]
-    [return: MarshalAs(UnmanagedType.Bool)]
-    public static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);
-}
-'@
-
-Add-Type -TypeDefinition $definition -ErrorAction SilentlyContinue
 
 # ============================================================
 # CONFIGURATION
@@ -50,118 +32,46 @@ $TempICS = Join-Path $env:TEMP "worklog-time.ics"
 $script:StartedOutlookByScript = $false
 
 # ============================================================
-# CLOSE EXISTING OUTLOOK
-# ============================================================
-
-function Close-Outlook {
-    Write-Host ""
-    Write-Host "Checking existing Outlook process..."
-
-    $process = Get-Process -Name OUTLOOK -ErrorAction SilentlyContinue
-
-    if ($null -eq $process) {
-        Write-Host "No Outlook process found."
-        return
-    }
-
-    Write-Host "Existing Outlook detected."
-    Write-Host "Closing Outlook..."
-
-    try {
-        $process | Stop-Process -Force
-        Start-Sleep -Seconds 5
-        Write-Host "Outlook closed."
-    }
-    catch {
-        Write-Host "Failed to close Outlook."
-        throw
-    }
-}
-
-# ============================================================
-# START OUTLOOK HIDDEN (STEALTH)
-# ============================================================
-
-function Start-Outlook-Hidden {
-    Write-Host ""
-    Write-Host "Starting Outlook in background (hidden)..."
-
-    Start-Process "outlook.exe"
-    $script:StartedOutlookByScript = $true
-
-    # Give Outlook a moment to spawn its window handle, then instantly hide it
-    Start-Sleep -Seconds 2
-
-    $swHide = 0 # SW_HIDE
-    $maxTries = 15
-    
-    for ($i = 0; $i -lt $maxTries; $i++) {
-        $outlookProc = Get-Process -Name OUTLOOK -ErrorAction SilentlyContinue
-        if ($outlookProc -and $outlookProc.MainWindowHandle -ne [IntPtr]::Zero) {
-            [WindowHelper]::ShowWindow($outlookProc.MainWindowHandle, $swHide) | Out-Null
-            break
-        }
-        Start-Sleep -Seconds 1
-    }
-
-    Start-Sleep -Seconds 2
-}
-
-# ============================================================
-# CONNECT TO OUTLOOK
+# CONNECT TO OUTLOOK (PURE COM BACKGROUND INSTANTIATION)
 # ============================================================
 
 function Connect-Outlook {
-    $maxAttempts = 30
-    $delaySeconds = 5
+    Write-Host ""
+    Write-Host "Connecting to Outlook via background COM..."
 
-    Close-Outlook
-    Start-Outlook-Hidden
+    $outlook = $null
+    $maxAttempts = 10
 
     for ($attempt = 1; $attempt -le $maxAttempts; $attempt++) {
         try {
-            Write-Host ""
-            Write-Host "Connecting Outlook COM..."
-            Write-Host "Attempt $attempt of $maxAttempts"
-
-            $outlook = [Runtime.InteropServices.Marshal]::GetActiveObject("Outlook.Application")
-            Write-Host "✓ Outlook COM connected"
-
-            $namespace = $outlook.GetNamespace("MAPI")
-            $inbox = $namespace.GetDefaultFolder(6)
-
-            if ($null -eq $inbox) {
-                throw "Inbox unavailable."
+            # Try to get existing instance first, or create a hidden background COM instance
+            $outlook = [Runtime.InteropServices.Marshal]::GetActiveObject("Outlook.Application") -as [Microsoft.Office.Interop.Outlook.Application]
+            if ($null -eq $outlook) {
+                throw "No active instance found."
             }
-
-            Write-Host "✓ MAPI ready"
-
-            [Runtime.InteropServices.Marshal]::ReleaseComObject($inbox) | Out-Null
-            [Runtime.InteropServices.Marshal]::ReleaseComObject($namespace) | Out-Null
-
-            return $outlook
+            Write-Host "✓ Connected to active Outlook instance"
+            break
         }
         catch {
-            Write-Host ""
-            Write-Host "Outlook COM not ready."
-            Write-Host $_.Exception.Message
-
-            if ($_.Exception.HResult -eq -2147418111) {
-                Write-Host "RPC_E_CALL_REJECTED detected."
+            try {
+                # Create a new background COM instance without opening a visible explorer window
+                $outlookType = [Type]::GetTypeFromProgID("Outlook.Application")
+                $outlook = [Activator]::CreateInstance($outlookType)
+                $script:StartedOutlookByScript = $true
+                Write-Host "✓ Created background Outlook COM instance"
+                break
             }
-
-            if ($_.Exception.HResult -eq -2147221021) {
-                Write-Host "MK_E_UNAVAILABLE detected."
-            }
-
-            if ($attempt -lt $maxAttempts) {
-                Start-Sleep -Seconds $delaySeconds
-            }
-            else {
-                throw
+            catch {
+                Write-Host "Attempt $attempt of $maxAttempts failed to bind Outlook COM. Retrying..."
+                if ($attempt -eq $maxAttempts) {
+                    throw "Failed to initialize Outlook COM interface: $_"
+                }
+                Start-Sleep -Seconds 3
             }
         }
     }
+
+    return $outlook
 }
 
 # ============================================================
@@ -445,7 +355,7 @@ try {
     Write-Host "========================================"
     Write-Host ""
 
-    # CONNECT OUTLOOK
+    # CONNECT OUTLOOK VIA BACKGROUND COM
     $outlook = Connect-Outlook
 
     # LOAD PROFILE
@@ -651,11 +561,11 @@ finally {
         Remove-Item $TempICS -Force -ErrorAction SilentlyContinue
     }
 
-    # Close Outlook since the import is complete (as requested)
+    # If the script spawned its own background COM process, terminate it cleanly so it leaves no orphaned invisible process.
     if ($script:StartedOutlookByScript) {
         Write-Host ""
-        Write-Host "Closing Outlook since import is finished..."
-        Close-Outlook
+        Write-Host "Closing background Outlook session..."
+        Stop-Process -Name OUTLOOK -Force -ErrorAction SilentlyContinue
     }
 
     Write-Host ""
