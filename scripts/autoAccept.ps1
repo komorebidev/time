@@ -11,7 +11,7 @@
 #   - Calendar updates
 #   - Background COM instantiation (completely avoids UI popups)
 #   - Deleting older matching emails
-#   - Deleting the newest imported email reliably via Move to Deleted Items (even if 0 items imported/changed)
+#   - Moving the newest processed email to the Archive folder reliably
 #   - Safe process cleanup upon completion
 #
 # ============================================================
@@ -347,6 +347,7 @@ $inbox = $null
 $calendar = $null
 $targetMail = $null
 $targetEntryID = $null
+$targetStoreID = $null
 $icsAttachment = $null
 $createdCount = 0
 $updatedCount = 0
@@ -405,8 +406,14 @@ try {
     Write-Host $targetMail.Subject
     Write-Host $targetMail.ReceivedTime
 
-    # CAPTURE ENTRY ID AND RELEASE TARGET MAIL POINTER
+    # CAPTURE ENTRY ID, STORE ID, AND RELEASE TARGET MAIL POINTER
     $targetEntryID = $targetMail.EntryID
+    try {
+        $targetStoreID = $targetMail.StoreID
+    }
+    catch {
+        $targetStoreID = $null
+    }
 
     # DELETE OLDER EMAILS
     if ($matchingEmails.Count -gt 1) {
@@ -566,25 +573,46 @@ try {
         }
     }
 
-    # MOVE THE NEWEST PROCESSED EMAIL TO DELETED ITEMS FOLDER VIA ENTRY ID (RUNS REGARDLESS OF CHANGES)
+    # MOVE THE NEWEST PROCESSED EMAIL TO THE ARCHIVE FOLDER (OR FALLBACK TO DELETED ITEMS)
     Write-Host ""
-    Write-Host "Cleaning up newest processed email..."
+    Write-Host "Moving newest processed email to Archive..."
     try {
-        $mailToDelete = $inbox.Items.Find("[EntryID] = '$targetEntryID'")
-        if ($null -ne $mailToDelete) {
-            $deletedItemsFolder = $namespace.GetDefaultFolder(3)
-            $mailToDelete.Move($deletedItemsFolder)
-            
-            [Runtime.InteropServices.Marshal]::ReleaseComObject($deletedItemsFolder) | Out-Null
-            [Runtime.InteropServices.Marshal]::ReleaseComObject($mailToDelete) | Out-Null
-            Write-Host "✓ Email moved to Deleted Items successfully"
+        $mailToMove = $null
+        if ($null -ne $targetStoreID) {
+            $mailToMove = $namespace.GetItemFromID($targetEntryID, $targetStoreID)
         }
         else {
-            Write-Host "Warning: Email already removed or not found by EntryID."
+            $mailToMove = $namespace.GetItemFromID($targetEntryID)
+        }
+
+        if ($null -ne $mailToMove) {
+            # Try to get the default Archive folder (Folder Type ID 23)
+            $archiveFolder = $null
+            try {
+                $archiveFolder = $namespace.GetDefaultFolder(23)
+            }
+            catch {
+                # Fallback if mailbox doesn't have a formal Archive folder enabled (use Deleted Items = 3)
+                $archiveFolder = $namespace.GetDefaultFolder(3)
+            }
+
+            if ($null -ne $archiveFolder) {
+                $mailToMove.Move($archiveFolder)
+                Write-Host "✓ Email moved successfully"
+                [Runtime.InteropServices.Marshal]::ReleaseComObject($archiveFolder) | Out-Null
+            }
+            else {
+                Write-Host "Warning: Could not resolve destination folder for archiving."
+            }
+
+            [Runtime.InteropServices.Marshal]::ReleaseComObject($mailToMove) | Out-Null
+        }
+        else {
+            Write-Host "Warning: Could not retrieve email via Session GetItemFromID for movement."
         }
     }
     catch {
-        Write-Host "Warning: Could not move email to deleted items: $_"
+        Write-Host "Warning: Move operation failed: $_"
     }
 
 }
