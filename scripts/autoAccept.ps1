@@ -1,4 +1,3 @@
-```powershell
 # ============================================================
 # Worklog ICS -> Outlook Calendar
 #
@@ -1144,4 +1143,3 @@ finally {
 
     [GC]::WaitForPendingFinalizers()
 }
-```
