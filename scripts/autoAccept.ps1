@@ -22,6 +22,12 @@
 #   - Duplicate prevention
 #   - Updating existing events
 #   - Outlook startup/RPC timing problems
+#   - Prevents re-importing processed emails
+#
+# NEW:
+#   - Successfully imported emails receive the Outlook
+#     category "WorkLog Imported"
+#   - Emails with that category are ignored on future runs
 # ============================================================
 
 
@@ -35,6 +41,18 @@ $ErrorActionPreference = "Stop"
 $SubjectSearch = "Work Log ICS:"
 
 $AttachmentName = "time.ics"
+
+
+# ============================================================
+# NEW:
+# Outlook category used as the processing marker.
+#
+# Once an email imports successfully, this category is added.
+# Future scheduled runs ignore emails containing this category.
+# ============================================================
+
+$ProcessedCategory = "WorkLog Imported"
+
 
 $TempICS = Join-Path `
     $env:TEMP `
@@ -156,14 +174,6 @@ function Parse-IcsDate {
     }
 
 
-    # --------------------------------------------------------
-    # Date only
-    #
-    # Example:
-    #
-    # 20260805
-    # --------------------------------------------------------
-
     if (
         $Value -match
         '^(\d{4})(\d{2})(\d{2})$'
@@ -176,14 +186,6 @@ function Parse-IcsDate {
         )
     }
 
-
-    # --------------------------------------------------------
-    # UTC date/time
-    #
-    # Example:
-    #
-    # 20260805T120000Z
-    # --------------------------------------------------------
 
     if (
         $Value -match
@@ -198,14 +200,6 @@ function Parse-IcsDate {
         ).ToLocalTime()
     }
 
-
-    # --------------------------------------------------------
-    # Local date/time
-    #
-    # Example:
-    #
-    # 20260805T120000
-    # --------------------------------------------------------
 
     if (
         $Value -match
@@ -222,7 +216,6 @@ function Parse-IcsDate {
 
     throw "Unsupported ICS date format: $Value"
 }
-
 
 # ============================================================
 # READ ICS EVENTS
@@ -273,10 +266,6 @@ function Read-IcsEvents {
         $line = $line.TrimEnd()
 
 
-        # ----------------------------------------------------
-        # BEGIN:VEVENT
-        # ----------------------------------------------------
-
         if ($line -eq "BEGIN:VEVENT") {
 
             $current = @{
@@ -286,10 +275,6 @@ function Read-IcsEvents {
             continue
         }
 
-
-        # ----------------------------------------------------
-        # END:VEVENT
-        # ----------------------------------------------------
 
         if ($line -eq "END:VEVENT") {
 
@@ -304,28 +289,11 @@ function Read-IcsEvents {
         }
 
 
-        # ----------------------------------------------------
-        # Ignore everything outside VEVENT
-        # ----------------------------------------------------
-
         if ($null -eq $current) {
 
             continue
         }
 
-
-        # ----------------------------------------------------
-        # Split property from value
-        #
-        # Example:
-        #
-        # DTSTART;VALUE=DATE:20260805
-        #
-        # becomes:
-        #
-        # property = DTSTART;VALUE=DATE
-        # value    = 20260805
-        # ----------------------------------------------------
 
         $parts = $line -split ":", 2
 
@@ -341,16 +309,6 @@ function Read-IcsEvents {
         $value = $parts[1]
 
 
-        # ----------------------------------------------------
-        # Remove parameters
-        #
-        # DTSTART;VALUE=DATE
-        #
-        # becomes:
-        #
-        # DTSTART
-        # ----------------------------------------------------
-
         $propertyName =
             ($propertyPart -split ";")[0].ToUpper()
 
@@ -361,6 +319,7 @@ function Read-IcsEvents {
 
     return $events
 }
+
 
 
 # ============================================================
@@ -451,6 +410,7 @@ function Find-ExistingWorklogEvent {
 }
 
 
+
 # ============================================================
 # MAIN
 # ============================================================
@@ -486,6 +446,7 @@ try {
     $outlook = Connect-Outlook
 
 
+
     # ========================================================
     # MAPI
     # ========================================================
@@ -498,6 +459,7 @@ try {
         $outlook.GetNamespace("MAPI")
 
     Write-Host "✓ MAPI profile accessed"
+
 
 
     # ========================================================
@@ -518,6 +480,7 @@ try {
     Write-Host $inbox.FolderPath
 
 
+
     # ========================================================
     # CALENDAR
     # ========================================================
@@ -535,21 +498,22 @@ try {
     Write-Host "Calendar:"
     Write-Host $calendar.FolderPath
 
-
-    # ========================================================
+        # ========================================================
     # SEARCH INBOX
     #
-    # We deliberately search for "Work Log ICS:" anywhere in
-    # the subject.
+    # We search for "Work Log ICS:" anywhere in the subject.
     #
     # This catches:
     #
     # Work Log ICS: time
     # FW: Work Log ICS: time
     # RE: Work Log ICS: time
-    # FW: FW: Work Log ICS: time
     #
     # We ALSO require a time.ics attachment.
+    #
+    # NEW:
+    # Emails already marked with the Outlook category
+    # "WorkLog Imported" are ignored.
     # ========================================================
 
     Write-Host ""
@@ -569,6 +533,7 @@ try {
 
     foreach ($mail in $mailItems) {
 
+
         # 43 = Outlook MailItem
 
         if ($mail.Class -ne 43) {
@@ -586,6 +551,28 @@ try {
 
             continue
         }
+
+
+        # ----------------------------------------------------
+        # NEW:
+        # Skip emails already successfully imported.
+        #
+        # The category is added only after the entire import
+        # succeeds, so failed imports remain retryable.
+        # ----------------------------------------------------
+
+        if (
+            $mail.Categories -and
+            $mail.Categories -match "(^|,\s*)$([regex]::Escape($ProcessedCategory))(,|$)"
+        ) {
+
+            Write-Host ""
+            Write-Host "Skipping already processed email:"
+            Write-Host "  $subject"
+
+            continue
+        }
+
 
 
         # ----------------------------------------------------
@@ -623,6 +610,7 @@ try {
     }
 
 
+
     # ========================================================
     # EMAIL NOT FOUND
     # ========================================================
@@ -640,6 +628,7 @@ try {
 
         exit 0
     }
+
 
 
     # ========================================================
@@ -660,6 +649,7 @@ try {
     Write-Host "    $($icsAttachment.FileName)"
 
 
+
     # ========================================================
     # SAVE ICS
     # ========================================================
@@ -667,6 +657,7 @@ try {
     Write-Host ""
 
     Write-Host "Saving ICS attachment..."
+
 
     if (Test-Path $TempICS) {
 
@@ -685,6 +676,7 @@ try {
     Write-Host "✓ ICS saved"
 
 
+
     # ========================================================
     # PARSE ICS
     # ========================================================
@@ -693,6 +685,7 @@ try {
 
     Write-Host "Parsing ICS..."
 
+
     $events =
         Read-IcsEvents $TempICS
 
@@ -700,6 +693,7 @@ try {
     Write-Host "✓ Events found: $($events.Count)"
 
     Write-Host ""
+
 
 
     # ========================================================
@@ -711,6 +705,7 @@ try {
     $updatedCount = 0
 
     $skippedCount = 0
+
 
 
     # ========================================================
@@ -772,8 +767,7 @@ try {
                 $properties["LOCATION"]
             )
 
-
-        # ----------------------------------------------------
+            # ----------------------------------------------------
         # DATES
         # ----------------------------------------------------
 
@@ -803,6 +797,7 @@ try {
         }
 
 
+
         # ====================================================
         # DISPLAY
         # ====================================================
@@ -828,6 +823,7 @@ try {
         }
 
 
+
         # ====================================================
         # FIND EXISTING EVENT
         # ====================================================
@@ -836,6 +832,7 @@ try {
             Find-ExistingWorklogEvent `
                 -Calendar $calendar `
                 -UID $uid
+
 
 
         # ====================================================
@@ -849,6 +846,7 @@ try {
 
             $appointment =
                 $calendar.Items.Add(1)
+
 
 
             # ------------------------------------------------
@@ -879,6 +877,7 @@ try {
                 $location
 
 
+
             # ------------------------------------------------
             # Busy status
             #
@@ -903,6 +902,7 @@ try {
             }
 
 
+
             # ------------------------------------------------
             # Store our stable UID
             # ------------------------------------------------
@@ -919,6 +919,7 @@ try {
                 $uid
 
 
+
             # ------------------------------------------------
             # Save
             # ------------------------------------------------
@@ -929,6 +930,7 @@ try {
             Write-Host "  ✓ Created"
 
             $createdCount++
+
 
 
             # ------------------------------------------------
@@ -950,6 +952,7 @@ try {
                 ) | Out-Null
             }
         }
+
 
 
         # ====================================================
@@ -985,6 +988,7 @@ try {
                 $location
 
 
+
             if (
                 $summary -eq "Out of Office"
             ) {
@@ -1013,6 +1017,52 @@ try {
 
         Write-Host ""
     }
+
+        # ========================================================
+    # NEW:
+    # MARK EMAIL AS PROCESSED
+    #
+    # This happens only after all ICS events have been handled.
+    #
+    # If anything failed before reaching this point, the email
+    # remains unmarked and will be retried on the next run.
+    #
+    # No external state file is required.
+    # Outlook itself stores the processing marker.
+    # ========================================================
+
+    if ($null -ne $targetMail) {
+
+        Write-Host ""
+        Write-Host "Marking email as processed..."
+
+
+        if (
+            [string]::IsNullOrWhiteSpace(
+                $targetMail.Categories
+            )
+        ) {
+
+            $targetMail.Categories =
+                $ProcessedCategory
+        }
+        elseif (
+            $targetMail.Categories -notmatch
+            "(^|,\s*)$([regex]::Escape($ProcessedCategory))(,|$)"
+        ) {
+
+            $targetMail.Categories +=
+                ", $ProcessedCategory"
+        }
+
+
+        $targetMail.Save()
+
+
+        Write-Host "✓ Email marked:"
+        Write-Host "  Category: $ProcessedCategory"
+    }
+
 
 
     # ========================================================
@@ -1059,7 +1109,6 @@ catch {
     exit 1
 }
 
-
 finally {
 
     # ========================================================
@@ -1073,6 +1122,7 @@ finally {
             -Force `
             -ErrorAction SilentlyContinue
     }
+
 
 
     # ========================================================
@@ -1135,11 +1185,43 @@ finally {
     }
 
 
+
     # ========================================================
     # FORCE COM CLEANUP
+    #
+    # Required because Outlook COM objects can remain alive
+    # after the script exits.
     # ========================================================
 
     [GC]::Collect()
 
     [GC]::WaitForPendingFinalizers()
 }
+
+# ============================================================
+# END OF SCRIPT
+#
+# The scheduled task can now run repeatedly.
+#
+# Behaviour:
+#
+# 1. Finds the newest email containing:
+#       Work Log ICS:
+#
+# 2. Requires:
+#       time.ics
+#
+# 3. Skips emails already marked:
+#       WorkLog Imported
+#
+# 4. Imports calendar events:
+#       - Creates missing events
+#       - Updates existing events
+#       - Preserves duplicate prevention through WorklogUID
+#
+# 5. After a successful import:
+#       Adds Outlook category:
+#       WorkLog Imported
+#
+# No external state files or folders are created.
+# ============================================================
