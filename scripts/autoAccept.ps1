@@ -10,6 +10,8 @@
 #   - Duplicate prevention
 #   - Calendar updates
 #   - Background COM instantiation (completely avoids UI popups)
+#   - Deleting older matching emails
+#   - Deleting the newest imported email after successful processing
 #   - Safe process cleanup upon completion
 #
 # ============================================================
@@ -44,7 +46,6 @@ function Connect-Outlook {
 
     for ($attempt = 1; $attempt -le $maxAttempts; $attempt++) {
         try {
-            # Try to get existing instance first, or create a hidden background COM instance
             $outlook = [Runtime.InteropServices.Marshal]::GetActiveObject("Outlook.Application") -as [Microsoft.Office.Interop.Outlook.Application]
             if ($null -eq $outlook) {
                 throw "No active instance found."
@@ -54,7 +55,6 @@ function Connect-Outlook {
         }
         catch {
             try {
-                # Create a new background COM instance without opening a visible explorer window
                 $outlookType = [Type]::GetTypeFromProgID("Outlook.Application")
                 $outlook = [Activator]::CreateInstance($outlookType)
                 $script:StartedOutlookByScript = $true
@@ -543,6 +543,18 @@ try {
             $skippedCount++
         }
     }
+
+    # DELETE THE NEWEST IMPORTED EMAIL AFTER SUCCESSFUL PROCESSING
+    Write-Host ""
+    Write-Host "Deleting successfully processed newest email..."
+    try {
+        $targetMail.Delete()
+        Write-Host "✓ Imported email deleted"
+    }
+    catch {
+        Write-Host "Warning: Could not delete the imported email."
+    }
+
 }
 finally {
     # Cleanup main COM objects
