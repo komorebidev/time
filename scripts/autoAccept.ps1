@@ -1,27 +1,110 @@
+```powershell
 # ============================================================
 # Worklog ICS -> Outlook Calendar
 #
-# Reads the latest "Work Log ICS: time" email from Outlook,
-# extracts time.ics, and creates/updates all calendar events.
+# Reads the latest email containing:
 #
-# Designed for classic Outlook desktop + Outlook COM.
+#     Work Log ICS:
+#
+# and a time.ics attachment.
+#
+# Supports forwarded emails such as:
+#
+#     FW: Work Log ICS: time
+#
+# Uses classic Outlook COM/MAPI.
+#
+# Handles:
+#   - Multiple VEVENTs in one ICS
+#   - All-day events
+#   - Descriptions
+#   - Locations
+#   - Out Of Office events
+#   - Duplicate prevention
+#   - Updating existing events
+#   - Outlook startup/RPC timing problems
 # ============================================================
+
 
 $ErrorActionPreference = "Stop"
 
-# ------------------------------------------------------------
+
+# ============================================================
 # CONFIGURATION
-# ------------------------------------------------------------
+# ============================================================
 
-$SubjectPrefix = "Work Log ICS:"
+$SubjectSearch = "Work Log ICS:"
 
-# Temporary location for the downloaded ICS
-$TempICS = Join-Path $env:TEMP "worklog-time.ics"
+$AttachmentName = "time.ics"
+
+$TempICS = Join-Path `
+    $env:TEMP `
+    "worklog-time.ics"
 
 
-# ------------------------------------------------------------
-# ICS TEXT DECODING
-# ------------------------------------------------------------
+# ============================================================
+# CONNECT TO OUTLOOK WITH RETRIES
+#
+# Outlook can temporarily reject COM requests while starting
+# or loading the profile.
+#
+# RPC_E_CALL_REJECTED
+# 0x80010001
+#
+# We retry instead of failing immediately.
+# ============================================================
+
+function Connect-Outlook {
+
+    $maxAttempts = 12
+
+    $delaySeconds = 5
+
+    for (
+        $attempt = 1;
+        $attempt -le $maxAttempts;
+        $attempt++
+    ) {
+
+        try {
+
+            Write-Host ""
+            Write-Host "Connecting to Outlook..."
+            Write-Host "Attempt $attempt of $maxAttempts"
+
+            $outlook = New-Object `
+                -ComObject Outlook.Application
+
+            Write-Host "✓ Outlook COM connected"
+
+            return $outlook
+        }
+        catch {
+
+            $message = $_.Exception.Message
+
+            Write-Host ""
+            Write-Host "Outlook is not ready yet."
+            Write-Host $message
+
+            if ($attempt -lt $maxAttempts) {
+
+                Write-Host ""
+                Write-Host "Waiting $delaySeconds seconds..."
+                Start-Sleep -Seconds $delaySeconds
+            }
+            else {
+
+                throw
+            }
+        }
+    }
+}
+
+
+# ============================================================
+# ICS TEXT UNESCAPING
+# ============================================================
 
 function Unescape-IcsText {
 
@@ -29,30 +112,37 @@ function Unescape-IcsText {
         [string]$Text
     )
 
+
     if ($null -eq $Text) {
+
         return ""
     }
 
+
     $Text = $Text -replace '\\n', "`r`n"
+
     $Text = $Text -replace '\\N', "`r`n"
+
     $Text = $Text -replace '\\,', ","
+
     $Text = $Text -replace '\\;', ";"
+
     $Text = $Text -replace '\\\\', "\"
+
 
     return $Text
 }
 
 
-# ------------------------------------------------------------
+# ============================================================
 # ICS DATE PARSER
 #
-# Your Python currently generates:
+# Supports:
 #
-# DTSTART;VALUE=DATE:20260805
-# DTEND;VALUE=DATE:20260806
-#
-# This also supports basic date/time formats.
-# ------------------------------------------------------------
+#     20260805
+#     20260805T120000
+#     20260805T120000Z
+# ============================================================
 
 function Parse-IcsDate {
 
@@ -60,16 +150,46 @@ function Parse-IcsDate {
         [string]$Value
     )
 
-    if ($Value -match '^(\d{4})(\d{2})(\d{2})$') {
+
+    if ([string]::IsNullOrWhiteSpace($Value)) {
+
+        throw "ICS date value is empty."
+    }
+
+
+    # --------------------------------------------------------
+    # Date only
+    #
+    # Example:
+    #
+    # 20260805
+    # --------------------------------------------------------
+
+    if (
+        $Value -match
+        '^(\d{4})(\d{2})(\d{2})$'
+    ) {
 
         return [datetime]::ParseExact(
             $Value,
             "yyyyMMdd",
-            $null
+            [Globalization.CultureInfo]::InvariantCulture
         )
     }
 
-    if ($Value -match '^(\d{4})(\d{2})(\d{2})T(\d{2})(\d{2})(\d{2})Z$') {
+
+    # --------------------------------------------------------
+    # UTC date/time
+    #
+    # Example:
+    #
+    # 20260805T120000Z
+    # --------------------------------------------------------
+
+    if (
+        $Value -match
+        '^(\d{4})(\d{2})(\d{2})T(\d{2})(\d{2})(\d{2})Z$'
+    ) {
 
         return [datetime]::ParseExact(
             $Value,
@@ -79,22 +199,35 @@ function Parse-IcsDate {
         ).ToLocalTime()
     }
 
-    if ($Value -match '^(\d{4})(\d{2})(\d{2})T(\d{2})(\d{2})(\d{2})$') {
+
+    # --------------------------------------------------------
+    # Local date/time
+    #
+    # Example:
+    #
+    # 20260805T120000
+    # --------------------------------------------------------
+
+    if (
+        $Value -match
+        '^(\d{4})(\d{2})(\d{2})T(\d{2})(\d{2})(\d{2})$'
+    ) {
 
         return [datetime]::ParseExact(
             $Value,
             "yyyyMMddTHHmmss",
-            $null
+            [Globalization.CultureInfo]::InvariantCulture
         )
     }
+
 
     throw "Unsupported ICS date format: $Value"
 }
 
 
-# ------------------------------------------------------------
-# PARSE ICS FILE
-# ------------------------------------------------------------
+# ============================================================
+# READ ICS EVENTS
+# ============================================================
 
 function Read-IcsEvents {
 
@@ -102,30 +235,48 @@ function Read-IcsEvents {
         [string]$Path
     )
 
+
     $raw = [System.IO.File]::ReadAllText(
         $Path,
         [System.Text.Encoding]::UTF8
     )
 
-    # Normalize line endings
-    $raw = $raw -replace "`r`n", "`n"
-    $raw = $raw -replace "`r", "`n"
 
     # --------------------------------------------------------
-    # Unfold iCalendar continuation lines
+    # Normalize line endings
+    # --------------------------------------------------------
+
+    $raw = $raw -replace "`r`n", "`n"
+
+    $raw = $raw -replace "`r", "`n"
+
+
+    # --------------------------------------------------------
+    # iCalendar line unfolding
+    #
+    # A line beginning with space/tab continues the previous
+    # line.
     # --------------------------------------------------------
 
     $raw = $raw -replace "`n[ `t]", ""
 
+
     $lines = $raw -split "`n"
+
 
     $events = @()
 
     $current = $null
 
+
     foreach ($line in $lines) {
 
         $line = $line.TrimEnd()
+
+
+        # ----------------------------------------------------
+        # BEGIN:VEVENT
+        # ----------------------------------------------------
 
         if ($line -eq "BEGIN:VEVENT") {
 
@@ -135,6 +286,11 @@ function Read-IcsEvents {
 
             continue
         }
+
+
+        # ----------------------------------------------------
+        # END:VEVENT
+        # ----------------------------------------------------
 
         if ($line -eq "END:VEVENT") {
 
@@ -148,40 +304,76 @@ function Read-IcsEvents {
             continue
         }
 
+
+        # ----------------------------------------------------
+        # Ignore everything outside VEVENT
+        # ----------------------------------------------------
+
         if ($null -eq $current) {
+
             continue
         }
+
+
+        # ----------------------------------------------------
+        # Split property from value
+        #
+        # Example:
+        #
+        # DTSTART;VALUE=DATE:20260805
+        #
+        # becomes:
+        #
+        # property = DTSTART;VALUE=DATE
+        # value    = 20260805
+        # ----------------------------------------------------
 
         $parts = $line -split ":", 2
 
+
         if ($parts.Count -ne 2) {
+
             continue
         }
 
+
         $propertyPart = $parts[0]
+
         $value = $parts[1]
 
-        # Remove parameters such as:
+
+        # ----------------------------------------------------
+        # Remove parameters
+        #
         # DTSTART;VALUE=DATE
-        $propertyName = ($propertyPart -split ";")[0].ToUpper()
+        #
+        # becomes:
+        #
+        # DTSTART
+        # ----------------------------------------------------
+
+        $propertyName =
+            ($propertyPart -split ";")[0].ToUpper()
+
 
         $current.Properties[$propertyName] = $value
     }
+
 
     return $events
 }
 
 
-# ------------------------------------------------------------
+# ============================================================
 # FIND EXISTING WORKLOG EVENT
 #
-# We use a custom Outlook UserProperty called:
+# We store the ICS UID in an Outlook custom property:
 #
 #     WorklogUID
 #
-# This lets us reliably update an existing event instead of
+# This allows the script to safely run repeatedly without
 # creating duplicates.
-# ------------------------------------------------------------
+# ============================================================
 
 function Find-ExistingWorklogEvent {
 
@@ -190,43 +382,58 @@ function Find-ExistingWorklogEvent {
         [string]$UID
     )
 
+
     $items = $null
+
 
     try {
 
         $items = $Calendar.Items
 
+
         foreach ($item in $items) {
-
-            # Only appointment items
-            if ($item.Class -ne 26) {
-                continue
-            }
-
-            $property = $null
 
             try {
 
-                $property = $item.UserProperties.Find(
-                    "WorklogUID"
-                )
+                # 26 = Outlook AppointmentItem
+                if ($item.Class -ne 26) {
 
-                if (
-                    $null -ne $property -and
-                    $property.Value -eq $UID
-                ) {
+                    continue
+                }
 
-                    return $item
+
+                $property = $null
+
+
+                try {
+
+                    $property =
+                        $item.UserProperties.Find(
+                            "WorklogUID"
+                        )
+
+
+                    if (
+                        $null -ne $property -and
+                        $property.Value -eq $UID
+                    ) {
+
+                        return $item
+                    }
+                }
+                finally {
+
+                    if ($property) {
+
+                        [System.Runtime.InteropServices.Marshal]::ReleaseComObject(
+                            $property
+                        ) | Out-Null
+                    }
                 }
             }
             catch {
-                # Ignore malformed/non-standard items
-            }
 
-            if ($property) {
-                [System.Runtime.InteropServices.Marshal]::ReleaseComObject(
-                    $property
-                ) | Out-Null
+                # Ignore individual malformed items
             }
         }
     }
@@ -240,148 +447,234 @@ function Find-ExistingWorklogEvent {
         }
     }
 
+
     return $null
 }
 
 
 # ============================================================
-# START OUTLOOK
+# MAIN
 # ============================================================
 
 $outlook = $null
+
 $namespace = $null
+
+$inbox = $null
+
 $calendar = $null
+
+$mailItems = $null
+
+$targetMail = $null
+
+$icsAttachment = $null
+
 
 try {
 
     Write-Host ""
     Write-Host "========================================"
-    Write-Host "Worklog Outlook Importer"
+    Write-Host "WORKLOG OUTLOOK IMPORTER"
     Write-Host "========================================"
     Write-Host ""
 
-    Write-Host "Connecting to Outlook..."
 
-    $outlook = New-Object -ComObject Outlook.Application
+    # ========================================================
+    # CONNECT TO OUTLOOK
+    # ========================================================
 
-    $namespace = $outlook.GetNamespace("MAPI")
+    $outlook = Connect-Outlook
 
-    Write-Host "✓ Outlook connected"
 
-    # --------------------------------------------------------
-    # Default Inbox
-    # 6 = olFolderInbox
-    # --------------------------------------------------------
+    # ========================================================
+    # MAPI
+    # ========================================================
 
-    $inbox = $namespace.GetDefaultFolder(6)
+    Write-Host ""
+
+    Write-Host "Accessing Outlook profile..."
+
+    $namespace =
+        $outlook.GetNamespace("MAPI")
+
+    Write-Host "✓ MAPI profile accessed"
+
+
+    # ========================================================
+    # INBOX
+    # ========================================================
+
+    Write-Host ""
+
+    Write-Host "Accessing Inbox..."
+
+    $inbox =
+        $namespace.GetDefaultFolder(6)
 
     Write-Host "✓ Inbox accessed"
 
-    # --------------------------------------------------------
-    # Default Calendar
-    #
-    # 9 = olFolderCalendar
-    # --------------------------------------------------------
+    Write-Host ""
+    Write-Host "Inbox:"
+    Write-Host $inbox.FolderPath
 
-    $calendar = $namespace.GetDefaultFolder(9)
 
-    Write-Host "✓ Calendar accessed"
+    # ========================================================
+    # CALENDAR
+    # ========================================================
+
     Write-Host ""
 
+    Write-Host "Accessing Calendar..."
+
+    $calendar =
+        $namespace.GetDefaultFolder(9)
+
+    Write-Host "✓ Calendar accessed"
+
+    Write-Host ""
+    Write-Host "Calendar:"
+    Write-Host $calendar.FolderPath
+
 
     # ========================================================
-    # FIND LATEST WORKLOG EMAIL
+    # SEARCH INBOX
+    #
+    # We deliberately search for "Work Log ICS:" anywhere in
+    # the subject.
+    #
+    # This catches:
+    #
+    # Work Log ICS: time
+    # FW: Work Log ICS: time
+    # RE: Work Log ICS: time
+    # FW: FW: Work Log ICS: time
+    #
+    # We ALSO require a time.ics attachment.
     # ========================================================
 
-    Write-Host "Searching for latest Work Log email..."
+    Write-Host ""
+
+    Write-Host "Searching Inbox for Work Log ICS email..."
 
     $mailItems = $inbox.Items
 
-    # Sort newest first
+
+    # Newest first
+
     $mailItems.Sort(
         "[ReceivedTime]",
         $true
     )
 
-    $targetMail = $null
 
     foreach ($mail in $mailItems) {
 
+        # 43 = Outlook MailItem
+
         if ($mail.Class -ne 43) {
+
             continue
         }
 
+
         $subject = [string]$mail.Subject
 
+
         if (
-            $subject.StartsWith(
-                $SubjectPrefix,
-                [StringComparison]::OrdinalIgnoreCase
-            )
+            $subject -notlike "*$SubjectSearch*"
         ) {
 
-            if ($mail.Attachments.Count -gt 0) {
+            continue
+        }
+
+
+        # ----------------------------------------------------
+        # Look specifically for time.ics
+        # ----------------------------------------------------
+
+        for (
+            $i = 1;
+            $i -le $mail.Attachments.Count;
+            $i++
+        ) {
+
+            $attachment =
+                $mail.Attachments.Item($i)
+
+
+            if (
+                $attachment.FileName -ieq
+                $AttachmentName
+            ) {
 
                 $targetMail = $mail
+
+                $icsAttachment = $attachment
 
                 break
             }
         }
-    }
 
 
-    if ($null -eq $targetMail) {
-
-        Write-Host "No Work Log ICS email found."
-        exit 0
-    }
-
-
-    Write-Host "✓ Found:"
-    Write-Host "  $($targetMail.Subject)"
-    Write-Host "  Received: $($targetMail.ReceivedTime)"
-    Write-Host ""
-
-
-    # ========================================================
-    # FIND time.ics
-    # ========================================================
-
-    $icsAttachment = $null
-
-    for ($i = 1; $i -le $targetMail.Attachments.Count; $i++) {
-
-        $attachment = $targetMail.Attachments.Item($i)
-
-        if (
-            $attachment.FileName -ieq "time.ics"
-        ) {
-
-            $icsAttachment = $attachment
+        if ($null -ne $targetMail) {
 
             break
         }
     }
 
 
-    if ($null -eq $icsAttachment) {
+    # ========================================================
+    # EMAIL NOT FOUND
+    # ========================================================
 
-        Write-Host "time.ics attachment not found."
+    if ($null -eq $targetMail) {
 
-        exit 1
+        Write-Host ""
+
+        Write-Host "No matching Work Log ICS email found."
+
+        Write-Host ""
+        Write-Host "Expected a message containing:"
+        Write-Host "  Subject: *Work Log ICS:*"
+        Write-Host "  Attachment: time.ics"
+
+        exit 0
     }
 
 
-    Write-Host "✓ Found attachment: time.ics"
+    # ========================================================
+    # EMAIL FOUND
+    # ========================================================
+
+    Write-Host ""
+
+    Write-Host "✓ Work Log email found"
+
+    Write-Host "  Subject:"
+    Write-Host "    $($targetMail.Subject)"
+
+    Write-Host "  Received:"
+    Write-Host "    $($targetMail.ReceivedTime)"
+
+    Write-Host "  Attachment:"
+    Write-Host "    $($icsAttachment.FileName)"
 
 
     # ========================================================
-    # SAVE ICS TEMPORARILY
+    # SAVE ICS
     # ========================================================
+
+    Write-Host ""
+
+    Write-Host "Saving ICS attachment..."
 
     if (Test-Path $TempICS) {
 
-        Remove-Item $TempICS -Force
+        Remove-Item `
+            $TempICS `
+            -Force `
+            -ErrorAction SilentlyContinue
     }
 
 
@@ -389,36 +682,59 @@ try {
         $TempICS
     )
 
-    Write-Host "✓ Saved ICS temporarily"
-    Write-Host ""
+
+    Write-Host "✓ ICS saved"
 
 
     # ========================================================
     # PARSE ICS
     # ========================================================
 
-    $events = Read-IcsEvents $TempICS
+    Write-Host ""
 
-    Write-Host "Events found: $($events.Count)"
+    Write-Host "Parsing ICS..."
+
+    $events =
+        Read-IcsEvents $TempICS
+
+
+    Write-Host "✓ Events found: $($events.Count)"
+
     Write-Host ""
 
 
     # ========================================================
-    # IMPORT EACH EVENT
+    # COUNTERS
     # ========================================================
 
     $createdCount = 0
+
     $updatedCount = 0
+
     $skippedCount = 0
 
 
+    # ========================================================
+    # PROCESS EACH EVENT
+    # ========================================================
+
     foreach ($icsEvent in $events) {
 
-        $properties = $icsEvent.Properties
+        $properties =
+            $icsEvent.Properties
 
-        $uid = $properties["UID"]
 
-        if ([string]::IsNullOrWhiteSpace($uid)) {
+        # ----------------------------------------------------
+        # UID
+        # ----------------------------------------------------
+
+        $uid =
+            $properties["UID"]
+
+
+        if (
+            [string]::IsNullOrWhiteSpace($uid)
+        ) {
 
             Write-Host "Skipping event without UID."
 
@@ -428,33 +744,58 @@ try {
         }
 
 
-        $summary = Unescape-IcsText(
-            $properties["SUMMARY"]
-        )
+        # ----------------------------------------------------
+        # SUMMARY
+        # ----------------------------------------------------
 
-        $description = Unescape-IcsText(
-            $properties["DESCRIPTION"]
-        )
+        $summary =
+            Unescape-IcsText(
+                $properties["SUMMARY"]
+            )
 
-        $location = Unescape-IcsText(
-            $properties["LOCATION"]
-        )
 
+        # ----------------------------------------------------
+        # DESCRIPTION
+        # ----------------------------------------------------
+
+        $description =
+            Unescape-IcsText(
+                $properties["DESCRIPTION"]
+            )
+
+
+        # ----------------------------------------------------
+        # LOCATION
+        # ----------------------------------------------------
+
+        $location =
+            Unescape-IcsText(
+                $properties["LOCATION"]
+            )
+
+
+        # ----------------------------------------------------
+        # DATES
+        # ----------------------------------------------------
 
         try {
 
-            $start = Parse-IcsDate(
-                $properties["DTSTART"]
-            )
+            $start =
+                Parse-IcsDate(
+                    $properties["DTSTART"]
+                )
 
-            $end = Parse-IcsDate(
-                $properties["DTEND"]
-            )
 
+            $end =
+                Parse-IcsDate(
+                    $properties["DTEND"]
+                )
         }
         catch {
 
-            Write-Host "Could not parse dates for $uid"
+            Write-Host ""
+            Write-Host "Could not parse event:"
+            Write-Host "  UID: $uid"
             Write-Host $_.Exception.Message
 
             $skippedCount++
@@ -463,50 +804,92 @@ try {
         }
 
 
-        Write-Host "Processing:"
-        Write-Host "  UID: $uid"
-        Write-Host "  Subject: $summary"
-        Write-Host "  Date: $($start.ToString('yyyy-MM-dd'))"
+        # ====================================================
+        # DISPLAY
+        # ====================================================
+
+        Write-Host "----------------------------------------"
+
+        Write-Host "Processing event"
+
+        Write-Host "  UID:"
+        Write-Host "    $uid"
+
+        Write-Host "  Summary:"
+        Write-Host "    $summary"
+
+        Write-Host "  Date:"
+        Write-Host "    $($start.ToString('yyyy-MM-dd'))"
 
 
-        # ----------------------------------------------------
-        # Find existing event
-        # ----------------------------------------------------
+        if ($location) {
 
-        $existing = Find-ExistingWorklogEvent `
-            -Calendar $calendar `
-            -UID $uid
+            Write-Host "  Location:"
+            Write-Host "    $location"
+        }
 
 
-        # ----------------------------------------------------
-        # Create new event
-        # ----------------------------------------------------
+        # ====================================================
+        # FIND EXISTING EVENT
+        # ====================================================
+
+        $existing =
+            Find-ExistingWorklogEvent `
+                -Calendar $calendar `
+                -UID $uid
+
+
+        # ====================================================
+        # CREATE EVENT
+        # ====================================================
 
         if ($null -eq $existing) {
 
-            $appointment = $calendar.Items.Add(1)
+            Write-Host "  Action: CREATE"
 
-            # Subject
-            $appointment.Subject = $summary
 
-            # All-day
-            $appointment.AllDayEvent = $true
-
-            # Dates
-            $appointment.Start = $start
-            $appointment.End = $end
-
-            # Description
-            $appointment.Body = $description
-
-            # Location
-            $appointment.Location = $location
+            $appointment =
+                $calendar.Items.Add(1)
 
 
             # ------------------------------------------------
-            # Out of Office
+            # Basic event information
+            # ------------------------------------------------
+
+            $appointment.Subject =
+                $summary
+
+
+            $appointment.Start =
+                $start
+
+
+            $appointment.End =
+                $end
+
+
+            $appointment.AllDayEvent =
+                $true
+
+
+            $appointment.Body =
+                $description
+
+
+            $appointment.Location =
+                $location
+
+
+            # ------------------------------------------------
+            # Busy status
             #
-            # 3 = olOutOfOffice
+            # Outlook:
+            #
+            # 0 = Free
+            # 1 = Tentative
+            # 2 = Busy
+            # 3 = Out of Office
+            # 4 = Working Elsewhere
             # ------------------------------------------------
 
             if (
@@ -522,7 +905,7 @@ try {
 
 
             # ------------------------------------------------
-            # Store our UID inside Outlook
+            # Store our stable UID
             # ------------------------------------------------
 
             $uidProperty =
@@ -532,7 +915,14 @@ try {
                     $false
                 )
 
-            $uidProperty.Value = $uid
+
+            $uidProperty.Value =
+                $uid
+
+
+            # ------------------------------------------------
+            # Save
+            # ------------------------------------------------
 
             $appointment.Save()
 
@@ -542,33 +932,58 @@ try {
             $createdCount++
 
 
-            # Release objects
-            [System.Runtime.InteropServices.Marshal]::ReleaseComObject(
-                $uidProperty
-            ) | Out-Null
+            # ------------------------------------------------
+            # Release COM objects
+            # ------------------------------------------------
 
-            [System.Runtime.InteropServices.Marshal]::ReleaseComObject(
-                $appointment
-            ) | Out-Null
+            if ($uidProperty) {
 
+                [System.Runtime.InteropServices.Marshal]::ReleaseComObject(
+                    $uidProperty
+                ) | Out-Null
+            }
+
+
+            if ($appointment) {
+
+                [System.Runtime.InteropServices.Marshal]::ReleaseComObject(
+                    $appointment
+                ) | Out-Null
+            }
         }
 
-        # ----------------------------------------------------
-        # Update existing event
-        # ----------------------------------------------------
+
+        # ====================================================
+        # UPDATE EXISTING EVENT
+        # ====================================================
 
         else {
 
-            $existing.Subject = $summary
+            Write-Host "  Action: UPDATE"
 
-            $existing.AllDayEvent = $true
 
-            $existing.Start = $start
-            $existing.End = $end
+            $existing.Subject =
+                $summary
 
-            $existing.Body = $description
 
-            $existing.Location = $location
+            $existing.Start =
+                $start
+
+
+            $existing.End =
+                $end
+
+
+            $existing.AllDayEvent =
+                $true
+
+
+            $existing.Body =
+                $description
+
+
+            $existing.Location =
+                $location
 
 
             if (
@@ -602,16 +1017,24 @@ try {
 
 
     # ========================================================
-    # SUMMARY
+    # FINAL SUMMARY
     # ========================================================
 
+    Write-Host ""
     Write-Host "========================================"
     Write-Host "IMPORT COMPLETE"
     Write-Host "========================================"
+
     Write-Host ""
-    Write-Host "Created: $createdCount"
-    Write-Host "Updated: $updatedCount"
-    Write-Host "Skipped: $skippedCount"
+
+    Write-Host "Events in ICS: $($events.Count)"
+
+    Write-Host "Created:       $createdCount"
+
+    Write-Host "Updated:       $updatedCount"
+
+    Write-Host "Skipped:       $skippedCount"
+
     Write-Host ""
 
 
@@ -619,21 +1042,73 @@ try {
 catch {
 
     Write-Host ""
+
     Write-Host "========================================"
-    Write-Host "ERROR"
+
+    Write-Host "IMPORT FAILED"
+
     Write-Host "========================================"
+
     Write-Host ""
+
     Write-Host $_.Exception.Message
+
     Write-Host ""
+
     Write-Host $_.ScriptStackTrace
 
     exit 1
 }
+
+
 finally {
+
+    # ========================================================
+    # CLEAN UP TEMP FILE
+    # ========================================================
 
     if (Test-Path $TempICS) {
 
-        Remove-Item $TempICS -Force -ErrorAction SilentlyContinue
+        Remove-Item `
+            $TempICS `
+            -Force `
+            -ErrorAction SilentlyContinue
+    }
+
+
+    # ========================================================
+    # RELEASE COM OBJECTS
+    # ========================================================
+
+    if ($icsAttachment) {
+
+        [System.Runtime.InteropServices.Marshal]::ReleaseComObject(
+            $icsAttachment
+        ) | Out-Null
+    }
+
+
+    if ($targetMail) {
+
+        [System.Runtime.InteropServices.Marshal]::ReleaseComObject(
+            $targetMail
+        ) | Out-Null
+    }
+
+
+    if ($mailItems) {
+
+        [System.Runtime.InteropServices.Marshal]::ReleaseComObject(
+            $mailItems
+        ) | Out-Null
+    }
+
+
+    if ($inbox) {
+
+        [System.Runtime.InteropServices.Marshal]::ReleaseComObject(
+            $inbox
+        ) | Out-Null
     }
 
 
@@ -644,12 +1119,14 @@ finally {
         ) | Out-Null
     }
 
+
     if ($namespace) {
 
         [System.Runtime.InteropServices.Marshal]::ReleaseComObject(
             $namespace
         ) | Out-Null
     }
+
 
     if ($outlook) {
 
@@ -659,6 +1136,12 @@ finally {
     }
 
 
+    # ========================================================
+    # FORCE COM CLEANUP
+    # ========================================================
+
     [GC]::Collect()
+
     [GC]::WaitForPendingFinalizers()
 }
+```
