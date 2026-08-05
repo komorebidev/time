@@ -10,12 +10,29 @@
 #   - Duplicate prevention
 #   - Calendar updates
 #   - Outlook startup timing problems
-#   - Outlook restart minimized
+#   - Outlook restart minimized (forced via API)
 #   - Safe Outlook shutdown upon completion
 #
 # ============================================================
 
 $ErrorActionPreference = "Stop"
+
+# ============================================================
+# WIN32 API FOR FORCED MINIMIZATION
+# ============================================================
+
+$definition = @'
+using System;
+using System.Runtime.InteropServices;
+
+public class WindowHelper {
+    [DllImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    public static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);
+}
+'@
+
+Add-Type -TypeDefinition $definition -ErrorAction SilentlyContinue
 
 # ============================================================
 # CONFIGURATION
@@ -62,21 +79,32 @@ function Close-Outlook {
 }
 
 # ============================================================
-# START OUTLOOK MINIMIZED
+# START OUTLOOK MINIMIZED (WITH FORCED API MINIMIZE)
 # ============================================================
 
 function Start-Outlook-Minimized {
     Write-Host ""
     Write-Host "Starting Outlook minimized..."
 
-    $processInfo = New-Object System.Diagnostics.ProcessStartInfo
-    $processInfo.FileName = "outlook.exe"
-    $processInfo.WindowStyle = [System.Diagnostics.ProcessWindowStyle]::Minimized
-    
-    [System.Diagnostics.Process]::Start($processInfo) | Out-Null
-    
+    Start-Process "outlook.exe"
     $script:StartedOutlookByScript = $true
-    Start-Sleep -Seconds 6
+
+    # Give Outlook a few moments to spawn its main window handle, then force minimize it
+    Start-Sleep -Seconds 2
+
+    $swMinimized = 2 # SW_SHOWMINIMIZED
+    $maxTries = 10
+    
+    for ($i = 0; $i -lt $maxTries; $i++) {
+        $outlookProc = Get-Process -Name OUTLOOK -ErrorAction SilentlyContinue
+        if ($outlookProc -and $outlookProc.MainWindowHandle -ne [IntPtr]::Zero) {
+            [WindowHelper]::ShowWindow($outlookProc.MainWindowHandle, $swMinimized) | Out-Null
+            break
+        }
+        Start-Sleep -Seconds 1
+    }
+
+    Start-Sleep -Seconds 3
 }
 
 # ============================================================
