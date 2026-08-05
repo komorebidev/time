@@ -11,7 +11,7 @@
 #   - Calendar updates
 #   - Background COM instantiation (completely avoids UI popups)
 #   - Deleting older matching emails
-#   - Moving the newest processed email to the Archive folder reliably
+#   - Moving the newest processed email to Deleted Items reliably (on every run)
 #   - Safe process cleanup upon completion
 #
 # ============================================================
@@ -573,9 +573,9 @@ try {
         }
     }
 
-    # MOVE THE NEWEST PROCESSED EMAIL TO THE ARCHIVE FOLDER (OR FALLBACK TO DELETED ITEMS)
+    # MOVE THE NEWEST PROCESSED EMAIL OUT OF INBOX (RUNS EVERY TIME)
     Write-Host ""
-    Write-Host "Moving newest processed email to Archive..."
+    Write-Host "Moving newest processed email out of inbox..."
     try {
         $mailToMove = $null
         if ($null -ne $targetStoreID) {
@@ -586,23 +586,15 @@ try {
         }
 
         if ($null -ne $mailToMove) {
-            # Try to get the default Archive folder (Folder Type ID 23)
-            $archiveFolder = $null
-            try {
-                $archiveFolder = $namespace.GetDefaultFolder(23)
-            }
-            catch {
-                # Fallback if mailbox doesn't have a formal Archive folder enabled (use Deleted Items = 3)
-                $archiveFolder = $namespace.GetDefaultFolder(3)
-            }
+            $destFolder = $namespace.GetDefaultFolder(3) # Deleted Items Folder
 
-            if ($null -ne $archiveFolder) {
-                $mailToMove.Move($archiveFolder)
+            if ($null -ne $destFolder) {
+                $mailToMove.Move($destFolder)
                 Write-Host "✓ Email moved successfully"
-                [Runtime.InteropServices.Marshal]::ReleaseComObject($archiveFolder) | Out-Null
+                [Runtime.InteropServices.Marshal]::ReleaseComObject($destFolder) | Out-Null
             }
             else {
-                Write-Host "Warning: Could not resolve destination folder for archiving."
+                Write-Host "Warning: Could not resolve destination folder."
             }
 
             [Runtime.InteropServices.Marshal]::ReleaseComObject($mailToMove) | Out-Null
