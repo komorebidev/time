@@ -58,7 +58,7 @@ function Connect-Outlook {
 }
 
 # ============================================================
-# ENSURE OUTLOOK RULE EXISTS (FIXED COM COLLECTION HANDLING)
+# ENSURE OUTLOOK RULE EXISTS (FIXED COM METHOD INVOCATION)
 # ============================================================
 
 function Ensure-OutlookRule {
@@ -100,8 +100,8 @@ function Ensure-OutlookRule {
         if (-not $ruleExists) {
             Write-Host "Creating Outlook rule: '$RuleName'..."
             
-            # Use explicit invocation on Rules collection to safely resolve dispatch method overload
-            $newRule = [Microsoft.Office.Interop.Outlook.Rules].InvokeMethod("Add", $rules, @($RuleName, 0))
+            # Use PowerShell dispatch invocation bypass to explicitly trigger the COM Add method
+            $newRule = [Microsoft.VisualBasic.Interaction]::CallByName($rules, "Add", [Microsoft.VisualBasic.CallType]::Method, $RuleName, 0)
             
             $categoryCondition = $newRule.Conditions.Category
             $categoryCondition.Enabled = $true
