@@ -1,14 +1,19 @@
 # ============================================================
 # Interactive Scheduled Task Setup
 #
-# Creates a Windows Task Scheduler task for a PowerShell script.
+# Creates a Windows Scheduled Task for a PowerShell script.
 #
-# Designed for Outlook COM automation:
-#   - Runs only when user is logged in
-#   - Runs silently / hidden
-#   - Runs repeatedly at a chosen interval
-#   - Prevents overlapping instances
-#   - Restarts after failure
+# Features:
+#   - Interactive script-path prompt
+#   - Interactive task-name prompt
+#   - Interactive interval prompt
+#   - Defaults to 20 minutes
+#   - Runs PowerShell hidden
+#   - Runs only when the current user is logged in
+#   - Prevents overlapping executions
+#   - Starts automatically when the PC becomes available
+#   - Restarts after failures
+#   - Can immediately test the task
 # ============================================================
 
 $ErrorActionPreference = "Stop"
@@ -17,6 +22,8 @@ $ErrorActionPreference = "Stop"
 # ============================================================
 # INTRO
 # ============================================================
+
+Clear-Host
 
 Write-Host ""
 Write-Host "=============================================="
@@ -30,9 +37,10 @@ Write-Host ""
 
 Write-Host "The task will:"
 Write-Host "  - Run only when you are logged in"
-Write-Host "  - Run hidden (no PowerShell window)"
-Write-Host "  - Prevent multiple copies running simultaneously"
-Write-Host "  - Retry automatically if the task fails"
+Write-Host "  - Run with no visible PowerShell window"
+Write-Host "  - Prevent overlapping instances"
+Write-Host "  - Start when the PC becomes available"
+Write-Host "  - Restart after failures"
 Write-Host ""
 
 
@@ -42,41 +50,43 @@ Write-Host ""
 
 while ($true) {
 
+    Write-Host ""
+
     $scriptPath = Read-Host `
         "Enter the full path to the PowerShell script to schedule"
 
-    $scriptPath = $scriptPath.Trim('"').Trim()
+    # Remove surrounding quotes if the user pasted:
+    # "C:\Worklog\Import-WorklogICS.ps1"
+
+    $scriptPath = $scriptPath.Trim().Trim('"')
 
 
     if ([string]::IsNullOrWhiteSpace($scriptPath)) {
 
         Write-Host ""
-        Write-Host "Please enter a script path."
-        Write-Host ""
-
+        Write-Host "ERROR: Please enter a script path."
         continue
     }
 
 
-    if (-not (Test-Path $scriptPath -PathType Leaf)) {
+    if (-not (Test-Path -LiteralPath $scriptPath -PathType Leaf)) {
 
         Write-Host ""
         Write-Host "ERROR: File not found:"
-        Write-Host $scriptPath
-        Write-Host ""
-
+        Write-Host "  $scriptPath"
         continue
     }
 
 
-    if (
-        [System.IO.Path]::GetExtension($scriptPath) -ne ".ps1"
-    ) {
+    $extension = [
+        System.IO.Path
+    ]::GetExtension($scriptPath)
+
+
+    if ($extension -ine ".ps1") {
 
         Write-Host ""
-        Write-Host "ERROR: The selected file does not appear to be a .ps1 file."
-        Write-Host ""
-
+        Write-Host "ERROR: The file must be a .ps1 PowerShell script."
         continue
     }
 
@@ -96,6 +106,7 @@ $defaultTaskName = "Worklog Outlook ICS Import"
 $taskName = Read-Host `
     "Task name [$defaultTaskName]"
 
+
 if ([string]::IsNullOrWhiteSpace($taskName)) {
 
     $taskName = $defaultTaskName
@@ -108,36 +119,45 @@ if ([string]::IsNullOrWhiteSpace($taskName)) {
 
 Write-Host ""
 
+$defaultInterval = 20
+
 while ($true) {
 
     $intervalInput = Read-Host `
-        "Run every how many minutes? [5]"
+        "Run every how many minutes? [$defaultInterval]"
+
+
+    # Blank = use default
 
     if ([string]::IsNullOrWhiteSpace($intervalInput)) {
 
-        $intervalMinutes = 5
+        $intervalMinutes = $defaultInterval
 
         break
     }
 
 
-    if (
-        [int]::TryParse(
-            $intervalInput,
-            [ref]$intervalMinutes
-        )
-    ) {
+    # Safely convert the user's input to an integer
 
-        if ($intervalMinutes -ge 1) {
+    try {
 
-            break
-        }
+        $intervalMinutes = [int]$intervalInput
+
+    }
+    catch {
+
+        $intervalMinutes = 0
+    }
+
+
+    if ($intervalMinutes -ge 1) {
+
+        break
     }
 
 
     Write-Host ""
-    Write-Host "Please enter a whole number of at least 1."
-    Write-Host ""
+    Write-Host "ERROR: Please enter a whole number of at least 1."
 }
 
 
@@ -166,7 +186,7 @@ Write-Host "  Every $intervalMinutes minute(s)"
 
 Write-Host ""
 
-Write-Host "User:"
+Write-Host "Windows user:"
 Write-Host "  $env:USERDOMAIN\$env:USERNAME"
 
 Write-Host ""
@@ -176,7 +196,7 @@ Write-Host "  Only when user is logged in"
 
 Write-Host ""
 
-Write-Host "Window:"
+Write-Host "PowerShell window:"
 Write-Host "  Hidden"
 
 Write-Host ""
@@ -188,6 +208,7 @@ Write-Host ""
 
 $confirmation = Read-Host `
     "Create this scheduled task? [Y/n]"
+
 
 if (
     $confirmation -and
@@ -202,7 +223,7 @@ if (
 
 
 # ============================================================
-# REMOVE EXISTING TASK IF PRESENT
+# CHECK FOR EXISTING TASK
 # ============================================================
 
 $existingTask = Get-ScheduledTask `
@@ -213,20 +234,24 @@ $existingTask = Get-ScheduledTask `
 if ($existingTask) {
 
     Write-Host ""
-    Write-Host "A task with this name already exists."
+    Write-Host "A scheduled task with this name already exists."
 
     $replace = Read-Host `
-        "Replace it? [y/N]"
+        "Replace the existing task? [y/N]"
+
 
     if (
         $replace -match "^(Y|y|Yes|yes)$"
     ) {
 
+        Write-Host ""
+        Write-Host "Removing existing task..."
+
         Unregister-ScheduledTask `
             -TaskName $taskName `
             -Confirm:$false
 
-        Write-Host "Existing task removed."
+        Write-Host "✓ Existing task removed."
     }
     else {
 
@@ -239,7 +264,10 @@ if ($existingTask) {
 
 
 # ============================================================
-# POWERSHELL PATH
+# FIND WINDOWS POWERSHELL
+#
+# We intentionally use Windows PowerShell 5.1 rather than
+# PowerShell 7 because the target script uses Outlook COM.
 # ============================================================
 
 $powerShellPath = Join-Path `
@@ -247,26 +275,34 @@ $powerShellPath = Join-Path `
     "System32\WindowsPowerShell\v1.0\powershell.exe"
 
 
-if (-not (Test-Path $powerShellPath)) {
+if (-not (Test-Path -LiteralPath $powerShellPath)) {
 
     throw "Windows PowerShell executable was not found."
 }
 
 
 # ============================================================
-# ACTION
+# CREATE ACTION
 #
-# IMPORTANT:
+# -NoProfile
+#       Faster and avoids profile-related interference.
 #
-# -WindowStyle Hidden prevents the PowerShell console window
-# from appearing every time the scheduled task runs.
+# -WindowStyle Hidden
+#       No PowerShell console appears when the task runs.
+#
+# -ExecutionPolicy Bypass
+#       Allows the selected script to run even if the local
+#       execution policy would otherwise block it.
 # ============================================================
+
+$escapedScriptPath = $scriptPath.Replace('"', '\"')
+
 
 $arguments = @(
     "-NoProfile"
     "-WindowStyle Hidden"
     "-ExecutionPolicy Bypass"
-    "-File `"$scriptPath`""
+    "-File `"$escapedScriptPath`""
 ) -join " "
 
 
@@ -276,45 +312,75 @@ $action = New-ScheduledTaskAction `
 
 
 # ============================================================
-# TRIGGER
+# CREATE TRIGGER
 #
-# Start 1 minute from now.
+# The task starts approximately one minute after setup.
 #
-# Then repeat at the selected interval.
+# It then repeats indefinitely.
+#
+# Windows Task Scheduler's repetition duration is represented
+# using a very long duration rather than a literal "infinite"
+# value.
 # ============================================================
 
 $startTime = (Get-Date).AddMinutes(1)
 
 
+$repetitionInterval =
+    New-TimeSpan -Minutes $intervalMinutes
+
+
+$repetitionDuration =
+    New-TimeSpan -Days 3650
+
+
 $trigger = New-ScheduledTaskTrigger `
     -Once `
     -At $startTime `
-    -RepetitionInterval (
-        New-TimeSpan -Minutes $intervalMinutes
-    ) `
-    -RepetitionDuration (
-        New-TimeSpan -Days 3650
-    )
+    -RepetitionInterval $repetitionInterval `
+    -RepetitionDuration $repetitionDuration
 
 
 # ============================================================
-# PRINCIPAL
+# CREATE PRINCIPAL
 #
 # InteractiveToken means:
 #
-#   Run only when the user is logged in.
+#   Run only when the current user is logged in.
 #
-# This is important for Outlook COM.
+# This is important because the target script communicates
+# with classic Outlook through COM.
 # ============================================================
 
+$currentUser =
+    "$env:USERDOMAIN\$env:USERNAME"
+
+
 $principal = New-ScheduledTaskPrincipal `
-    -UserId "$env:USERDOMAIN\$env:USERNAME" `
+    -UserId $currentUser `
     -LogonType Interactive `
     -RunLevel Limited
 
 
 # ============================================================
-# SETTINGS
+# CREATE SETTINGS
+#
+# AllowStartIfOnBatteries
+#   Allows the task to run on battery.
+#
+# DontStopIfGoingOnBatteries
+#   Don't terminate it merely because the laptop switches
+#   from AC to battery.
+#
+# StartWhenAvailable
+#   Allows Windows to start the task when it becomes available
+#   after being unavailable/asleep.
+#
+# MultipleInstances IgnoreNew
+#   Never launch a second copy if one is already running.
+#
+# RestartCount / RestartInterval
+#   Retry failed executions.
 # ============================================================
 
 $settings = New-ScheduledTaskSettingsSet `
@@ -329,7 +395,7 @@ $settings = New-ScheduledTaskSettingsSet `
 
 
 # ============================================================
-# CREATE TASK
+# REGISTER TASK
 # ============================================================
 
 Write-Host ""
@@ -341,7 +407,8 @@ Register-ScheduledTask `
     -Trigger $trigger `
     -Principal $principal `
     -Settings $settings `
-    -Description "Automatically runs the Worklog Outlook ICS importer silently."
+    -Description `
+        "Automatically runs the Worklog Outlook ICS importer."
 
 
 # ============================================================
@@ -354,7 +421,7 @@ Write-Host " SUCCESS"
 Write-Host "=============================================="
 Write-Host ""
 
-Write-Host "Scheduled task created:"
+Write-Host "Task:"
 Write-Host "  $taskName"
 
 Write-Host ""
@@ -374,18 +441,19 @@ Write-Host "  Hidden"
 
 Write-Host ""
 
-Write-Host "The first run will occur around:"
-Write-Host "  $startTime"
+Write-Host "First scheduled run:"
+Write-Host "  Approximately $startTime"
 
 Write-Host ""
 
-Write-Host "It will run only while you are logged into Windows."
+Write-Host "Run mode:"
+Write-Host "  Only while you are logged in"
 
 Write-Host ""
 
 
 # ============================================================
-# ASK WHETHER TO RUN NOW
+# ASK WHETHER TO TEST NOW
 # ============================================================
 
 $runNow = Read-Host `
@@ -403,21 +471,36 @@ if (
     Start-ScheduledTask `
         -TaskName $taskName
 
+
+    Start-Sleep -Seconds 3
+
+
+    $task =
+        Get-ScheduledTask `
+            -TaskName $taskName
+
+
+    Write-Host ""
+    Write-Host "Task state:"
+    Write-Host "  $($task.State)"
+
     Write-Host ""
 
-    Write-Host "Task started."
+    Write-Host "The task has been started."
+
+    Write-Host "Because PowerShell is configured as hidden,"
+    Write-Host "no PowerShell window should appear."
 
     Write-Host ""
 
-    Write-Host "Because the task runs hidden, you will not see"
-    Write-Host "a PowerShell window appear."
-
-    Write-Host ""
-
-    Write-Host "You can check Task Scheduler to confirm the"
-    Write-Host "task is running/completing successfully."
+    Write-Host "You can check Task Scheduler for the"
+    Write-Host "last run result if needed."
 }
 
+
+# ============================================================
+# DONE
+# ============================================================
 
 Write-Host ""
 Write-Host "Setup complete."
