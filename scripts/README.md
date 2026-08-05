@@ -12,6 +12,8 @@ Push work logs to calendar as ics invites using Azure resources to send the emai
 * Update all calendar entries logic when making script changes
 * Generates a static ics hosted on Github pages (docs folder) that can be subscribed to by iCloud (showing day offs, etc. only)
 * Automatic acceptance of the ics file in corporate mailbox
+* Marks processed ICS emails
+* Deletes ics emails after import
 
 ## iCloud Calendar subscription URL 
 
