@@ -11,10 +11,18 @@ Push work logs to calendar as ics invites using Azure resources to send the emai
 * Office location support (if wfh or remote is detected for that day)
 * Update all calendar entries logic when making script changes
 * Generates a static ics hosted on Github pages (docs folder) that can be subscribed to by iCloud (showing day offs, etc. only)
+* Automatic acceptance of the ics file in corporate mailbox
 
 ## iCloud Calendar subscription URL 
 
 * https://YOUR_USERNAME.github.io/time/time.ics
+
+## Automating the acceptance of ics invitation in corporate Outlook
+
+* Graph consent is blocked
+* Will use Outlook desktop COM connection instead
+* Uses Powershell on local client to fetch the ics file and accept automatically
+* Needs configured Outlook desktop
 
 ## Resources
 
