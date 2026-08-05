@@ -1,3 +1,4 @@
+```powershell
 # ============================================================
 # Interactive Scheduled Task Setup
 #
@@ -11,7 +12,7 @@
 #   - Runs PowerShell hidden
 #   - Runs only when the current user is logged in
 #   - Prevents overlapping executions
-#   - Starts automatically when the PC becomes available
+#   - Starts when the PC becomes available
 #   - Restarts after failures
 #   - Can immediately test the task
 # ============================================================
@@ -78,9 +79,7 @@ while ($true) {
     }
 
 
-    $extension = [
-        System.IO.Path
-    ]::GetExtension($scriptPath)
+    $extension = [System.IO.Path]::GetExtension($scriptPath)
 
 
     if ($extension -ine ".ps1") {
@@ -251,7 +250,7 @@ if ($existingTask) {
             -TaskName $taskName `
             -Confirm:$false
 
-        Write-Host "✓ Existing task removed."
+        Write-Host "Existing task removed."
     }
     else {
 
@@ -285,24 +284,20 @@ if (-not (Test-Path -LiteralPath $powerShellPath)) {
 # CREATE ACTION
 #
 # -NoProfile
-#       Faster and avoids profile-related interference.
+#       Avoids loading the user's PowerShell profile.
 #
 # -WindowStyle Hidden
-#       No PowerShell console appears when the task runs.
+#       Prevents a PowerShell console window appearing.
 #
 # -ExecutionPolicy Bypass
-#       Allows the selected script to run even if the local
-#       execution policy would otherwise block it.
+#       Allows the selected script to execute.
 # ============================================================
-
-$escapedScriptPath = $scriptPath.Replace('"', '\"')
-
 
 $arguments = @(
     "-NoProfile"
     "-WindowStyle Hidden"
     "-ExecutionPolicy Bypass"
-    "-File `"$escapedScriptPath`""
+    "-File `"$scriptPath`""
 ) -join " "
 
 
@@ -314,23 +309,22 @@ $action = New-ScheduledTaskAction `
 # ============================================================
 # CREATE TRIGGER
 #
-# The task starts approximately one minute after setup.
+# First run:
+#   Approximately one minute after setup.
 #
-# It then repeats indefinitely.
+# Then:
+#   Repeat at the selected interval.
 #
-# Windows Task Scheduler's repetition duration is represented
-# using a very long duration rather than a literal "infinite"
-# value.
+# The 3650-day duration is approximately 10 years,
+# effectively making this a long-running repeating task.
 # ============================================================
 
 $startTime = (Get-Date).AddMinutes(1)
 
-
-$repetitionInterval =
+$repetitionInterval = `
     New-TimeSpan -Minutes $intervalMinutes
 
-
-$repetitionDuration =
+$repetitionDuration = `
     New-TimeSpan -Days 3650
 
 
@@ -348,11 +342,10 @@ $trigger = New-ScheduledTaskTrigger `
 #
 #   Run only when the current user is logged in.
 #
-# This is important because the target script communicates
-# with classic Outlook through COM.
+# This is important for Outlook COM automation.
 # ============================================================
 
-$currentUser =
+$currentUser = `
     "$env:USERDOMAIN\$env:USERNAME"
 
 
@@ -369,18 +362,16 @@ $principal = New-ScheduledTaskPrincipal `
 #   Allows the task to run on battery.
 #
 # DontStopIfGoingOnBatteries
-#   Don't terminate it merely because the laptop switches
-#   from AC to battery.
+#   Doesn't stop an active run when switching to battery.
 #
 # StartWhenAvailable
-#   Allows Windows to start the task when it becomes available
-#   after being unavailable/asleep.
+#   Lets Windows run the task when it becomes available.
 #
 # MultipleInstances IgnoreNew
-#   Never launch a second copy if one is already running.
+#   Prevents overlapping executions.
 #
 # RestartCount / RestartInterval
-#   Retry failed executions.
+#   Retries failed task executions.
 # ============================================================
 
 $settings = New-ScheduledTaskSettingsSet `
@@ -436,7 +427,7 @@ Write-Host "  Every $intervalMinutes minute(s)"
 
 Write-Host ""
 
-Write-Host "Window:"
+Write-Host "PowerShell window:"
 Write-Host "  Hidden"
 
 Write-Host ""
@@ -475,9 +466,8 @@ if (
     Start-Sleep -Seconds 3
 
 
-    $task =
-        Get-ScheduledTask `
-            -TaskName $taskName
+    $task = Get-ScheduledTask `
+        -TaskName $taskName
 
 
     Write-Host ""
@@ -486,15 +476,15 @@ if (
 
     Write-Host ""
 
-    Write-Host "The task has been started."
+    Write-Host "Task started successfully."
 
+    Write-Host ""
     Write-Host "Because PowerShell is configured as hidden,"
     Write-Host "no PowerShell window should appear."
 
     Write-Host ""
-
-    Write-Host "You can check Task Scheduler for the"
-    Write-Host "last run result if needed."
+    Write-Host "You can check Task Scheduler to verify"
+    Write-Host "the Last Run Result if necessary."
 }
 
 
@@ -505,3 +495,4 @@ if (
 Write-Host ""
 Write-Host "Setup complete."
 Write-Host ""
+```
