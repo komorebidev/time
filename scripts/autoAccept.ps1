@@ -1,7 +1,7 @@
 # ============================================================
 # Worklog ICS -> Outlook Calendar
 #
-# Reads the latest email containing:
+# Reads the newest email containing:
 #
 #     Work Log ICS:
 #
@@ -22,12 +22,14 @@
 #   - Duplicate prevention
 #   - Updating existing events
 #   - Outlook startup/RPC timing problems
-#   - Prevents re-importing processed emails
 #
 # NEW:
-#   - Successfully imported emails receive the Outlook
-#     category "WorkLog Imported"
-#   - Emails with that category are ignored on future runs
+#   - Only imports the newest matching email
+#   - Deletes older matching Work Log ICS emails
+#   - Marks successful imports
+#   - Deletes imported source emails
+#
+# No external state folder is required.
 # ============================================================
 
 
@@ -43,13 +45,7 @@ $SubjectSearch = "Work Log ICS:"
 $AttachmentName = "time.ics"
 
 
-# ============================================================
-# NEW:
-# Outlook category used as the processing marker.
-#
-# Once an email imports successfully, this category is added.
-# Future scheduled runs ignore emails containing this category.
-# ============================================================
+# Outlook category used before deleting processed email
 
 $ProcessedCategory = "WorkLog Imported"
 
@@ -57,6 +53,7 @@ $ProcessedCategory = "WorkLog Imported"
 $TempICS = Join-Path `
     $env:TEMP `
     "worklog-time.ics"
+
 
 
 # ============================================================
@@ -68,7 +65,6 @@ $TempICS = Join-Path `
 # RPC_E_CALL_REJECTED
 # 0x80010001
 #
-# We retry instead of failing immediately.
 # ============================================================
 
 function Connect-Outlook {
@@ -76,6 +72,7 @@ function Connect-Outlook {
     $maxAttempts = 12
 
     $delaySeconds = 5
+
 
     for (
         $attempt = 1;
@@ -89,26 +86,31 @@ function Connect-Outlook {
             Write-Host "Connecting to Outlook..."
             Write-Host "Attempt $attempt of $maxAttempts"
 
+
             $outlook = New-Object `
                 -ComObject Outlook.Application
 
+
             Write-Host "✓ Outlook COM connected"
 
+
             return $outlook
+
         }
         catch {
 
-            $message = $_.Exception.Message
-
             Write-Host ""
             Write-Host "Outlook is not ready yet."
-            Write-Host $message
+            Write-Host $_.Exception.Message
+
 
             if ($attempt -lt $maxAttempts) {
 
                 Write-Host ""
                 Write-Host "Waiting $delaySeconds seconds..."
-                Start-Sleep -Seconds $delaySeconds
+
+                Start-Sleep `
+                    -Seconds $delaySeconds
             }
             else {
 
@@ -117,6 +119,7 @@ function Connect-Outlook {
         }
     }
 }
+
 
 
 # ============================================================
@@ -151,14 +154,16 @@ function Unescape-IcsText {
 }
 
 
+
 # ============================================================
 # ICS DATE PARSER
 #
 # Supports:
 #
-#     20260805
-#     20260805T120000
-#     20260805T120000Z
+# 20260805
+# 20260805T120000
+# 20260805T120000Z
+#
 # ============================================================
 
 function Parse-IcsDate {
@@ -175,8 +180,7 @@ function Parse-IcsDate {
 
 
     if (
-        $Value -match
-        '^(\d{4})(\d{2})(\d{2})$'
+        $Value -match '^(\d{4})(\d{2})(\d{2})$'
     ) {
 
         return [datetime]::ParseExact(
@@ -188,8 +192,7 @@ function Parse-IcsDate {
 
 
     if (
-        $Value -match
-        '^(\d{4})(\d{2})(\d{2})T(\d{2})(\d{2})(\d{2})Z$'
+        $Value -match '^(\d{4})(\d{2})(\d{2})T(\d{2})(\d{2})(\d{2})Z$'
     ) {
 
         return [datetime]::ParseExact(
@@ -202,8 +205,7 @@ function Parse-IcsDate {
 
 
     if (
-        $Value -match
-        '^(\d{4})(\d{2})(\d{2})T(\d{2})(\d{2})(\d{2})$'
+        $Value -match '^(\d{4})(\d{2})(\d{2})T(\d{2})(\d{2})(\d{2})$'
     ) {
 
         return [datetime]::ParseExact(
@@ -216,7 +218,6 @@ function Parse-IcsDate {
 
     throw "Unsupported ICS date format: $Value"
 }
-
 # ============================================================
 # READ ICS EVENTS
 # ============================================================
@@ -234,21 +235,14 @@ function Read-IcsEvents {
     )
 
 
-    # --------------------------------------------------------
     # Normalize line endings
-    # --------------------------------------------------------
 
     $raw = $raw -replace "`r`n", "`n"
 
     $raw = $raw -replace "`r", "`n"
 
 
-    # --------------------------------------------------------
     # iCalendar line unfolding
-    #
-    # A line beginning with space/tab continues the previous
-    # line.
-    # --------------------------------------------------------
 
     $raw = $raw -replace "`n[ `t]", ""
 
@@ -295,7 +289,7 @@ function Read-IcsEvents {
         }
 
 
-        $parts = $line -split ":", 2
+        $parts = $line -split ":",2
 
 
         if ($parts.Count -ne 2) {
@@ -322,15 +316,16 @@ function Read-IcsEvents {
 
 
 
+
+
 # ============================================================
 # FIND EXISTING WORKLOG EVENT
 #
-# We store the ICS UID in an Outlook custom property:
+# Uses Outlook custom property:
 #
 #     WorklogUID
 #
-# This allows the script to safely run repeatedly without
-# creating duplicates.
+# Prevents duplicate calendar entries.
 # ============================================================
 
 function Find-ExistingWorklogEvent {
@@ -353,7 +348,8 @@ function Find-ExistingWorklogEvent {
 
             try {
 
-                # 26 = Outlook AppointmentItem
+                # AppointmentItem
+
                 if ($item.Class -ne 26) {
 
                     continue
@@ -378,6 +374,7 @@ function Find-ExistingWorklogEvent {
 
                         return $item
                     }
+
                 }
                 finally {
 
@@ -388,12 +385,14 @@ function Find-ExistingWorklogEvent {
                         ) | Out-Null
                     }
                 }
+
             }
             catch {
 
-                # Ignore individual malformed items
+                # Ignore bad calendar items
             }
         }
+
     }
     finally {
 
@@ -411,6 +410,115 @@ function Find-ExistingWorklogEvent {
 
 
 
+
+
+
+# ============================================================
+# FIND LATEST WORKLOG EMAIL
+#
+# Searches Inbox for:
+#
+# Subject:
+#     *Work Log ICS:*
+#
+# Attachment:
+#     time.ics
+#
+# Returns newest matching email.
+#
+# Older matching emails are returned separately so they can
+# be deleted.
+# ============================================================
+
+function Find-WorklogEmails {
+
+    param(
+        $Inbox
+    )
+
+
+    $matches = @()
+
+
+    $items = $Inbox.Items
+
+
+    try {
+
+        $items.Sort(
+            "[ReceivedTime]",
+            $true
+        )
+
+
+        foreach ($mail in $items) {
+
+
+            # Outlook MailItem
+
+            if ($mail.Class -ne 43) {
+
+                continue
+            }
+
+
+            $subject =
+                [string]$mail.Subject
+
+
+            if (
+                $subject -notlike "*$SubjectSearch*"
+            ) {
+
+                continue
+            }
+
+
+            $hasAttachment = $false
+
+
+            for (
+                $i = 1;
+                $i -le $mail.Attachments.Count;
+                $i++
+            ) {
+
+
+                $attachment =
+                    $mail.Attachments.Item($i)
+
+
+                if (
+                    $attachment.FileName -ieq $AttachmentName
+                ) {
+
+                    $hasAttachment = $true
+
+                    break
+                }
+            }
+
+
+            if ($hasAttachment) {
+
+                $matches += $mail
+            }
+        }
+
+    }
+    finally {
+
+        if ($items) {
+
+            [System.Runtime.InteropServices.Marshal]::ReleaseComObject(
+                $items
+            ) | Out-Null
+        }
+    }
+
+
+    return $matches
+}
 # ============================================================
 # MAIN
 # ============================================================
@@ -432,6 +540,7 @@ $icsAttachment = $null
 
 try {
 
+
     Write-Host ""
     Write-Host "========================================"
     Write-Host "WORKLOG OUTLOOK IMPORTER"
@@ -439,11 +548,14 @@ try {
     Write-Host ""
 
 
+
     # ========================================================
     # CONNECT TO OUTLOOK
     # ========================================================
 
-    $outlook = Connect-Outlook
+    $outlook =
+        Connect-Outlook
+
 
 
 
@@ -455,10 +567,13 @@ try {
 
     Write-Host "Accessing Outlook profile..."
 
+
     $namespace =
         $outlook.GetNamespace("MAPI")
 
+
     Write-Host "✓ MAPI profile accessed"
+
 
 
 
@@ -470,14 +585,20 @@ try {
 
     Write-Host "Accessing Inbox..."
 
+
     $inbox =
         $namespace.GetDefaultFolder(6)
 
+
     Write-Host "✓ Inbox accessed"
 
+
     Write-Host ""
+
     Write-Host "Inbox:"
     Write-Host $inbox.FolderPath
+
+
 
 
 
@@ -489,236 +610,182 @@ try {
 
     Write-Host "Accessing Calendar..."
 
+
     $calendar =
         $namespace.GetDefaultFolder(9)
 
+
     Write-Host "✓ Calendar accessed"
 
+
     Write-Host ""
+
     Write-Host "Calendar:"
     Write-Host $calendar.FolderPath
 
-# SEARCH INBOX
-#
-# We search for:
-#
-#   Subject contains "Work Log ICS:"
-#   Attachment = time.ics
-#
-# If multiple matching emails exist:
-#
-#   - Newest email is imported
-#   - Older matching emails are deleted
-#   - Previously processed emails are deleted
-#
-# This prevents scheduled runs from repeatedly importing
-# old ICS attachments.
-# ========================================================
-
-
-Write-Host ""
-
-Write-Host "Searching Inbox for Work Log ICS emails..."
-
-
-$mailItems = $inbox.Items
-
-
-# Newest first
-
-$mailItems.Sort(
-    "[ReceivedTime]",
-    $true
-)
 
 
 
-# --------------------------------------------------------
-# Collect all matching Work Log emails
-# --------------------------------------------------------
 
-$matchingMails = @()
+    # ========================================================
+    # FIND MATCHING EMAILS
+    #
+    # New behaviour:
+    #
+    # - Find all matching Work Log ICS emails
+    # - Pick newest
+    # - Delete older ones
+    #
+    # ========================================================
+
+    Write-Host ""
+
+    Write-Host "Searching for Work Log ICS emails..."
 
 
-foreach ($mail in $mailItems) {
 
+    $matchingEmails =
+        Find-WorklogEmails `
+            -Inbox $inbox
 
-    # 43 = Outlook MailItem
-
-    if ($mail.Class -ne 43) {
-
-        continue
-    }
-
-
-    $subject = [string]$mail.Subject
 
 
     if (
-        $subject -notlike "*$SubjectSearch*"
+        $matchingEmails.Count -eq 0
     ) {
 
-        continue
+        Write-Host ""
+
+        Write-Host "No Work Log ICS emails found."
+
+        exit 0
     }
 
 
-    $foundAttachment = $false
 
+
+    # Newest first
+
+    $targetMail =
+        $matchingEmails[0]
+
+
+
+    Write-Host ""
+
+    Write-Host "Newest Work Log email selected:"
+
+
+    Write-Host "Subject:"
+    Write-Host $targetMail.Subject
+
+
+    Write-Host "Received:"
+    Write-Host $targetMail.ReceivedTime
+
+
+
+
+    # ========================================================
+    # DELETE OLD MATCHING EMAILS
+    #
+    # Keeps mailbox clean.
+    #
+    # Only the newest email is processed.
+    #
+    # ========================================================
+
+    if (
+        $matchingEmails.Count -gt 1
+    ) {
+
+
+        Write-Host ""
+
+        Write-Host "Deleting older Work Log emails..."
+
+
+        for (
+            $i = 1;
+            $i -lt $matchingEmails.Count;
+            $i++
+        ) {
+
+
+            $oldMail =
+                $matchingEmails[$i]
+
+
+            Write-Host ""
+
+            Write-Host "Deleting:"
+            Write-Host $oldMail.Subject
+
+            Write-Host $oldMail.ReceivedTime
+
+
+            $oldMail.Delete()
+        }
+
+
+        Write-Host ""
+
+        Write-Host "✓ Old emails deleted"
+    }
+
+
+
+
+
+
+    # ========================================================
+    # FIND TIME.ICS ATTACHMENT
+    # ========================================================
 
     for (
         $i = 1;
-        $i -le $mail.Attachments.Count;
+        $i -le $targetMail.Attachments.Count;
         $i++
     ) {
 
+
         $attachment =
-            $mail.Attachments.Item($i)
+            $targetMail.Attachments.Item($i)
+
 
 
         if (
-            $attachment.FileName -ieq $AttachmentName
+            $attachment.FileName -ieq
+            $AttachmentName
         ) {
 
-            $foundAttachment = $true
+
+            $icsAttachment =
+                $attachment
+
 
             break
         }
     }
 
 
-    if ($foundAttachment) {
 
-        $matchingMails += $mail
+
+    if ($null -eq $icsAttachment) {
+
+
+        throw "Selected email has no time.ics attachment."
     }
-}
 
 
 
-# ========================================================
-# NO EMAILS FOUND
-# ========================================================
-
-if ($matchingMails.Count -eq 0) {
 
     Write-Host ""
 
-    Write-Host "No matching Work Log ICS email found."
-
-    exit 0
-}
-
-
-
-# ========================================================
-# SORT NEWEST FIRST
-# ========================================================
-
-$matchingMails =
-    $matchingMails |
-    Sort-Object ReceivedTime -Descending
-
-
-
-# ========================================================
-# KEEP ONLY THE NEWEST EMAIL
-# ========================================================
-
-$targetMail =
-    $matchingMails[0]
-
-
-
-Write-Host ""
-
-Write-Host "Newest Work Log email selected:"
-
-Write-Host "  Subject:"
-Write-Host "    $($targetMail.Subject)"
-
-Write-Host "  Received:"
-Write-Host "    $($targetMail.ReceivedTime)"
-
-
-
-# ========================================================
-# DELETE ALL OLDER MATCHING EMAILS
-#
-# The newest email is kept.
-# Everything else is removed.
-# ========================================================
-
-if ($matchingMails.Count -gt 1) {
-
-
-    for (
-        $i = 1;
-        $i -lt $matchingMails.Count;
-        $i++
-    ) {
-
-
-        $oldMail =
-            $matchingMails[$i]
-
-
-        Write-Host ""
-
-        Write-Host "Deleting older Work Log email:"
-
-        Write-Host "  $($oldMail.Subject)"
-
-        Write-Host "  $($oldMail.ReceivedTime)"
-
-
-        $oldMail.Delete()
-    }
-}
-
-
-
-# ========================================================
-# GET THE ICS ATTACHMENT FROM THE SELECTED EMAIL
-# ========================================================
-
-for (
-    $i = 1;
-    $i -le $targetMail.Attachments.Count;
-    $i++
-) {
-
-
-    $attachment =
-        $targetMail.Attachments.Item($i)
-
-
-    if (
-        $attachment.FileName -ieq $AttachmentName
-    ) {
-
-        $icsAttachment = $attachment
-
-        break
-    }
-}
-
-
-
-if ($null -eq $icsAttachment) {
-
-    throw "Selected Work Log email does not contain time.ics"
-}
-
-
-
-Write-Host ""
-
-Write-Host "✓ Work Log email selected"
-
-Write-Host "  Attachment:"
-Write-Host "    $($icsAttachment.FileName)"
-    
+    Write-Host "Attachment found:"
+    Write-Host $icsAttachment.FileName
     # ========================================================
-    # SAVE ICS
+    # SAVE ICS FILE
     # ========================================================
 
     Write-Host ""
@@ -744,6 +811,7 @@ Write-Host "    $($icsAttachment.FileName)"
 
 
 
+
     # ========================================================
     # PARSE ICS
     # ========================================================
@@ -754,12 +822,14 @@ Write-Host "    $($icsAttachment.FileName)"
 
 
     $events =
-        Read-IcsEvents $TempICS
+        Read-IcsEvents `
+            $TempICS
 
 
     Write-Host "✓ Events found: $($events.Count)"
 
     Write-Host ""
+
 
 
 
@@ -775,14 +845,19 @@ Write-Host "    $($icsAttachment.FileName)"
 
 
 
+
+
     # ========================================================
     # PROCESS EACH EVENT
     # ========================================================
 
     foreach ($icsEvent in $events) {
 
+
         $properties =
             $icsEvent.Properties
+
+
 
 
         # ----------------------------------------------------
@@ -793,16 +868,22 @@ Write-Host "    $($icsAttachment.FileName)"
             $properties["UID"]
 
 
+
         if (
             [string]::IsNullOrWhiteSpace($uid)
         ) {
 
+
             Write-Host "Skipping event without UID."
+
 
             $skippedCount++
 
+
             continue
         }
+
+
 
 
         # ----------------------------------------------------
@@ -815,6 +896,8 @@ Write-Host "    $($icsAttachment.FileName)"
             )
 
 
+
+
         # ----------------------------------------------------
         # DESCRIPTION
         # ----------------------------------------------------
@@ -823,6 +906,8 @@ Write-Host "    $($icsAttachment.FileName)"
             Unescape-IcsText(
                 $properties["DESCRIPTION"]
             )
+
+
 
 
         # ----------------------------------------------------
@@ -834,11 +919,16 @@ Write-Host "    $($icsAttachment.FileName)"
                 $properties["LOCATION"]
             )
 
-            # ----------------------------------------------------
+
+
+
+
+        # ----------------------------------------------------
         # DATES
         # ----------------------------------------------------
 
         try {
+
 
             $start =
                 Parse-IcsDate(
@@ -850,18 +940,26 @@ Write-Host "    $($icsAttachment.FileName)"
                 Parse-IcsDate(
                     $properties["DTEND"]
                 )
+
         }
         catch {
 
+
             Write-Host ""
+
             Write-Host "Could not parse event:"
-            Write-Host "  UID: $uid"
+            Write-Host "UID: $uid"
+
             Write-Host $_.Exception.Message
+
 
             $skippedCount++
 
+
             continue
         }
+
+
 
 
 
@@ -869,25 +967,32 @@ Write-Host "    $($icsAttachment.FileName)"
         # DISPLAY
         # ====================================================
 
+        Write-Host ""
         Write-Host "----------------------------------------"
 
         Write-Host "Processing event"
 
-        Write-Host "  UID:"
-        Write-Host "    $uid"
 
-        Write-Host "  Summary:"
-        Write-Host "    $summary"
+        Write-Host "UID:"
+        Write-Host $uid
 
-        Write-Host "  Date:"
-        Write-Host "    $($start.ToString('yyyy-MM-dd'))"
+
+        Write-Host "Summary:"
+        Write-Host $summary
+
+
+        Write-Host "Date:"
+        Write-Host $start.ToString("yyyy-MM-dd")
+
 
 
         if ($location) {
 
-            Write-Host "  Location:"
-            Write-Host "    $location"
+            Write-Host "Location:"
+            Write-Host $location
         }
+
+
 
 
 
@@ -899,16 +1004,15 @@ Write-Host "    $($icsAttachment.FileName)"
             Find-ExistingWorklogEvent `
                 -Calendar $calendar `
                 -UID $uid
-
-
-
         # ====================================================
-        # CREATE EVENT
+        # CREATE NEW EVENT
         # ====================================================
 
         if ($null -eq $existing) {
 
-            Write-Host "  Action: CREATE"
+
+            Write-Host "Action: CREATE"
+
 
 
             $appointment =
@@ -916,8 +1020,9 @@ Write-Host "    $($icsAttachment.FileName)"
 
 
 
+
             # ------------------------------------------------
-            # Basic event information
+            # BASIC INFORMATION
             # ------------------------------------------------
 
             $appointment.Subject =
@@ -945,16 +1050,16 @@ Write-Host "    $($icsAttachment.FileName)"
 
 
 
+
+
             # ------------------------------------------------
-            # Busy status
-            #
-            # Outlook:
+            # BUSY STATUS
             #
             # 0 = Free
             # 1 = Tentative
             # 2 = Busy
-            # 3 = Out of Office
-            # 4 = Working Elsewhere
+            # 3 = Out Of Office
+            #
             # ------------------------------------------------
 
             if (
@@ -970,8 +1075,13 @@ Write-Host "    $($icsAttachment.FileName)"
 
 
 
+
+
             # ------------------------------------------------
-            # Store our stable UID
+            # STORE ICS UID
+            #
+            # Used for duplicate prevention
+            #
             # ------------------------------------------------
 
             $uidProperty =
@@ -987,22 +1097,24 @@ Write-Host "    $($icsAttachment.FileName)"
 
 
 
+
+
             # ------------------------------------------------
-            # Save
+            # SAVE EVENT
             # ------------------------------------------------
 
             $appointment.Save()
 
 
-            Write-Host "  ✓ Created"
+
+            Write-Host "✓ Created"
+
 
             $createdCount++
 
 
 
-            # ------------------------------------------------
-            # Release COM objects
-            # ------------------------------------------------
+
 
             if ($uidProperty) {
 
@@ -1012,13 +1124,18 @@ Write-Host "    $($icsAttachment.FileName)"
             }
 
 
+
             if ($appointment) {
 
                 [System.Runtime.InteropServices.Marshal]::ReleaseComObject(
                     $appointment
                 ) | Out-Null
             }
+
         }
+
+
+
 
 
 
@@ -1028,7 +1145,9 @@ Write-Host "    $($icsAttachment.FileName)"
 
         else {
 
-            Write-Host "  Action: UPDATE"
+
+            Write-Host "Action: UPDATE"
+
 
 
             $existing.Subject =
@@ -1056,6 +1175,8 @@ Write-Host "    $($icsAttachment.FileName)"
 
 
 
+
+
             if (
                 $summary -eq "Out of Office"
             ) {
@@ -1068,12 +1189,20 @@ Write-Host "    $($icsAttachment.FileName)"
             }
 
 
+
+
+
             $existing.Save()
 
 
-            Write-Host "  ✓ Updated"
+
+            Write-Host "✓ Updated"
+
 
             $updatedCount++
+
+
+
 
 
             [System.Runtime.InteropServices.Marshal]::ReleaseComObject(
@@ -1082,26 +1211,33 @@ Write-Host "    $($icsAttachment.FileName)"
         }
 
 
+
         Write-Host ""
     }
 
-        # ========================================================
-    # NEW:
-    # MARK EMAIL AS PROCESSED
+
+
+
+
+
+
+    # ========================================================
+    # MARK EMAIL AND DELETE AFTER SUCCESSFUL IMPORT
     #
-    # This happens only after all ICS events have been handled.
+    # Category is added before deletion.
     #
-    # If anything failed before reaching this point, the email
-    # remains unmarked and will be retried on the next run.
+    # This leaves a processing marker if Outlook delays
+    # deletion.
     #
-    # No external state file is required.
-    # Outlook itself stores the processing marker.
     # ========================================================
 
     if ($null -ne $targetMail) {
 
+
         Write-Host ""
+
         Write-Host "Marking email as processed..."
+
 
 
         if (
@@ -1112,6 +1248,7 @@ Write-Host "    $($icsAttachment.FileName)"
 
             $targetMail.Categories =
                 $ProcessedCategory
+
         }
         elseif (
             $targetMail.Categories -notmatch
@@ -1123,23 +1260,39 @@ Write-Host "    $($icsAttachment.FileName)"
         }
 
 
+
         $targetMail.Save()
 
 
-        Write-Host "✓ Email marked:"
-        Write-Host "  Category: $ProcessedCategory"
+
+        Write-Host "✓ Category added:"
+        Write-Host $ProcessedCategory
+
+
+
+
+        Write-Host ""
+
+        Write-Host "Deleting processed Work Log email..."
+
+
+
+        $targetMail.Delete()
+
+
+
+        Write-Host "✓ Email deleted"
     }
-
-
-
-    # ========================================================
+        # ========================================================
     # FINAL SUMMARY
     # ========================================================
 
     Write-Host ""
+
     Write-Host "========================================"
     Write-Host "IMPORT COMPLETE"
     Write-Host "========================================"
+
 
     Write-Host ""
 
@@ -1151,11 +1304,13 @@ Write-Host "    $($icsAttachment.FileName)"
 
     Write-Host "Skipped:       $skippedCount"
 
+
     Write-Host ""
 
 
 }
 catch {
+
 
     Write-Host ""
 
@@ -1165,30 +1320,39 @@ catch {
 
     Write-Host "========================================"
 
+
     Write-Host ""
 
     Write-Host $_.Exception.Message
+
 
     Write-Host ""
 
     Write-Host $_.ScriptStackTrace
 
+
     exit 1
 }
 
+
+
 finally {
 
+
     # ========================================================
-    # CLEAN UP TEMP FILE
+    # CLEAN TEMP ICS
     # ========================================================
 
     if (Test-Path $TempICS) {
+
 
         Remove-Item `
             $TempICS `
             -Force `
             -ErrorAction SilentlyContinue
     }
+
+
 
 
 
@@ -1204,12 +1368,14 @@ finally {
     }
 
 
+
     if ($targetMail) {
 
         [System.Runtime.InteropServices.Marshal]::ReleaseComObject(
             $targetMail
         ) | Out-Null
     }
+
 
 
     if ($mailItems) {
@@ -1220,12 +1386,14 @@ finally {
     }
 
 
+
     if ($inbox) {
 
         [System.Runtime.InteropServices.Marshal]::ReleaseComObject(
             $inbox
         ) | Out-Null
     }
+
 
 
     if ($calendar) {
@@ -1236,12 +1404,14 @@ finally {
     }
 
 
+
     if ($namespace) {
 
         [System.Runtime.InteropServices.Marshal]::ReleaseComObject(
             $namespace
         ) | Out-Null
     }
+
 
 
     if ($outlook) {
@@ -1253,11 +1423,13 @@ finally {
 
 
 
+
+
     # ========================================================
     # FORCE COM CLEANUP
     #
-    # Required because Outlook COM objects can remain alive
-    # after the script exits.
+    # Prevents orphaned Outlook COM processes.
+    #
     # ========================================================
 
     [GC]::Collect()
@@ -1265,30 +1437,38 @@ finally {
     [GC]::WaitForPendingFinalizers()
 }
 
+
+
 # ============================================================
 # END OF SCRIPT
 #
-# The scheduled task can now run repeatedly.
+# Scheduled task behaviour:
 #
-# Behaviour:
+# 1. Finds all emails containing:
 #
-# 1. Finds the newest email containing:
 #       Work Log ICS:
 #
-# 2. Requires:
+#    with:
+#
 #       time.ics
 #
-# 3. Skips emails already marked:
+#
+# 2. Keeps newest email only.
+#
+# 3. Deletes older matching emails.
+#
+# 4. Imports ICS events.
+#
+# 5. Creates or updates Outlook calendar items.
+#
+# 6. Uses WorklogUID to prevent duplicate events.
+#
+# 7. Marks imported email:
+#
 #       WorkLog Imported
 #
-# 4. Imports calendar events:
-#       - Creates missing events
-#       - Updates existing events
-#       - Preserves duplicate prevention through WorklogUID
+# 8. Deletes imported source email.
 #
-# 5. After a successful import:
-#       Adds Outlook category:
-#       WorkLog Imported
+# 9. No state folder required.
 #
-# No external state files or folders are created.
 # ============================================================
