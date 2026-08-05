@@ -59,20 +59,76 @@ $TempICS = Join-Path `
 # ============================================================
 # CONNECT TO OUTLOOK WITH RETRIES
 #
-# Outlook can temporarily reject COM requests while starting
-# or loading the profile.
+# Checks whether Outlook desktop is running.
 #
-# RPC_E_CALL_REJECTED
-# 0x80010001
+# If not running:
+#   - Starts Outlook.exe
+#   - Waits for Outlook initialization
+#   - Connects through COM
 #
+# Handles:
+#   RPC_E_CALL_REJECTED
+#   Outlook startup timing issues
 # ============================================================
 
 function Connect-Outlook {
+
 
     $maxAttempts = 12
 
     $delaySeconds = 5
 
+
+
+    # --------------------------------------------------------
+    # Check if Outlook desktop is already running
+    # --------------------------------------------------------
+
+    $outlookProcess =
+        Get-Process `
+            -Name OUTLOOK `
+            -ErrorAction SilentlyContinue
+
+
+
+    if ($null -eq $outlookProcess) {
+
+
+        Write-Host ""
+
+        Write-Host "Outlook desktop is not running."
+
+        Write-Host "Starting Outlook..."
+
+
+
+        Start-Process `
+            "outlook.exe"
+
+
+
+        Write-Host "Waiting for Outlook startup..."
+
+
+
+        Start-Sleep `
+            -Seconds 10
+    }
+    else {
+
+
+        Write-Host ""
+
+        Write-Host "Outlook desktop already running."
+
+    }
+
+
+
+
+    # --------------------------------------------------------
+    # Connect COM with retries
+    # --------------------------------------------------------
 
     for (
         $attempt = 1;
@@ -80,46 +136,83 @@ function Connect-Outlook {
         $attempt++
     ) {
 
+
         try {
 
+
             Write-Host ""
-            Write-Host "Connecting to Outlook..."
+
+            Write-Host "Connecting to Outlook COM..."
+
             Write-Host "Attempt $attempt of $maxAttempts"
 
 
-            $outlook = New-Object `
-                -ComObject Outlook.Application
+
+            $outlook =
+                New-Object `
+                    -ComObject Outlook.Application
+
 
 
             Write-Host "✓ Outlook COM connected"
 
 
+
+            # ------------------------------------------------
+            # Verify MAPI is available
+            # ------------------------------------------------
+
+            Write-Host "Checking MAPI profile..."
+
+
+
+            $namespace =
+                $outlook.GetNamespace("MAPI")
+
+
+
+            Write-Host "✓ MAPI available"
+
+
+
             return $outlook
+
 
         }
         catch {
 
+
             Write-Host ""
+
             Write-Host "Outlook is not ready yet."
+
             Write-Host $_.Exception.Message
 
 
-            if ($attempt -lt $maxAttempts) {
+
+            if (
+                $attempt -lt $maxAttempts
+            ) {
+
 
                 Write-Host ""
+
                 Write-Host "Waiting $delaySeconds seconds..."
+
+
 
                 Start-Sleep `
                     -Seconds $delaySeconds
+
             }
             else {
+
 
                 throw
             }
         }
     }
 }
-
 
 
 # ============================================================
