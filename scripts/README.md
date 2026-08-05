@@ -23,6 +23,7 @@ Push work logs to calendar as ics invites using Azure resources to send the emai
 * Will use Outlook desktop COM connection instead
 * Uses Powershell on local client to fetch the ics file and accept automatically
 * Needs configured Outlook desktop
+* Run setuptimeTask.ps1 with the script path as pointing to autoAccept.ps1
 
 ## Resources
 
