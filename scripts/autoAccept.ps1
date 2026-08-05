@@ -1,5 +1,5 @@
 # ============================================================
-# Worklog ICS -> Outlook Calendar
+# Worklog ICS -> Outlook Calendar (Stealth / Hidden Mode)
 #
 # Uses classic Outlook COM/MAPI.
 #
@@ -10,12 +10,29 @@
 #   - Duplicate prevention
 #   - Calendar updates
 #   - Outlook startup timing problems
-#   - Outlook restart minimized (forced via COM ActiveWindow)
+#   - Outlook run completely hidden via Win32 API
 #   - Safe Outlook shutdown upon completion
 #
 # ============================================================
 
 $ErrorActionPreference = "Stop"
+
+# ============================================================
+# WIN32 API FOR FORCED WINDOW HIDING
+# ============================================================
+
+$definition = @'
+using System;
+using System.Runtime.InteropServices;
+
+public class WindowHelper {
+    [DllImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    public static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);
+}
+'@
+
+Add-Type -TypeDefinition $definition -ErrorAction SilentlyContinue
 
 # ============================================================
 # CONFIGURATION
@@ -62,40 +79,31 @@ function Close-Outlook {
 }
 
 # ============================================================
-# START OUTLOOK MINIMIZED (VIA COM ACTIVE WINDOW STATE)
+# START OUTLOOK HIDDEN (STEALTH)
 # ============================================================
 
-function Start-Outlook-Minimized {
+function Start-Outlook-Hidden {
     Write-Host ""
-    Write-Host "Starting Outlook minimized..."
+    Write-Host "Starting Outlook in background (hidden)..."
 
-    # Launch normally via shell first to spawn process
     Start-Process "outlook.exe"
     $script:StartedOutlookByScript = $true
 
-    # Allow application to boot up, then hook via COM and force minimize window state
-    $maxAttempts = 15
-    for ($i = 1; $i -le $maxAttempts; $i++) {
+    # Give Outlook a moment to spawn its window handle, then instantly hide it
+    Start-Sleep -Seconds 2
+
+    $swHide = 0 # SW_HIDE
+    $maxTries = 15
+    
+    for ($i = 0; $i -lt $maxTries; $i++) {
+        $outlookProc = Get-Process -Name OUTLOOK -ErrorAction SilentlyContinue
+        if ($outlookProc -and $outlookProc.MainWindowHandle -ne [IntPtr]::Zero) {
+            [WindowHelper]::ShowWindow($outlookProc.MainWindowHandle, $swHide) | Out-Null
+            break
+        }
         Start-Sleep -Seconds 1
-        try {
-            $app = [Runtime.InteropServices.Marshal]::GetActiveObject("Outlook.Application")
-            if ($app) {
-                # Attempt to minimize all open explorers/inspectors or ActiveWindow
-                $activeWin = $app.ActiveWindow()
-                if ($activeWin) {
-                    $activeWin.WindowState = 1 # olMinimized = 1
-                }
-                foreach ($exp in $app.Explorers) {
-                    $exp.WindowState = 1
-                }
-                [Runtime.InteropServices.Marshal]::ReleaseComObject($app) | Out-Null
-                break
-            }
-        }
-        catch {
-            # Retry if COM isn't fully responsive yet
-        }
     }
+
     Start-Sleep -Seconds 2
 }
 
@@ -108,7 +116,7 @@ function Connect-Outlook {
     $delaySeconds = 5
 
     Close-Outlook
-    Start-Outlook-Minimized
+    Start-Outlook-Hidden
 
     for ($attempt = 1; $attempt -le $maxAttempts; $attempt++) {
         try {
