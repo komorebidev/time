@@ -4,7 +4,8 @@
 # Creates a Windows Task Scheduler task for a PowerShell script.
 #
 # Designed for Outlook COM automation:
-#   - Runs only when current user is logged in
+#   - Runs only when user is logged in
+#   - Runs silently / hidden
 #   - Runs repeatedly at a chosen interval
 #   - Prevents overlapping instances
 #   - Restarts after failure
@@ -24,12 +25,12 @@ Write-Host "=============================================="
 Write-Host ""
 
 Write-Host "This will create a scheduled task that runs"
-Write-Host "a PowerShell script periodically."
+Write-Host "a PowerShell script periodically and silently."
 Write-Host ""
 
 Write-Host "The task will:"
 Write-Host "  - Run only when you are logged in"
-Write-Host "  - Run using your current Windows account"
+Write-Host "  - Run hidden (no PowerShell window)"
 Write-Host "  - Prevent multiple copies running simultaneously"
 Write-Host "  - Retry automatically if the task fails"
 Write-Host ""
@@ -175,6 +176,11 @@ Write-Host "  Only when user is logged in"
 
 Write-Host ""
 
+Write-Host "Window:"
+Write-Host "  Hidden"
+
+Write-Host ""
+
 
 # ============================================================
 # CONFIRM
@@ -249,11 +255,24 @@ if (-not (Test-Path $powerShellPath)) {
 
 # ============================================================
 # ACTION
+#
+# IMPORTANT:
+#
+# -WindowStyle Hidden prevents the PowerShell console window
+# from appearing every time the scheduled task runs.
 # ============================================================
+
+$arguments = @(
+    "-NoProfile"
+    "-WindowStyle Hidden"
+    "-ExecutionPolicy Bypass"
+    "-File `"$scriptPath`""
+) -join " "
+
 
 $action = New-ScheduledTaskAction `
     -Execute $powerShellPath `
-    -Argument "-NoProfile -ExecutionPolicy Bypass -File `"$scriptPath`""
+    -Argument $arguments
 
 
 # ============================================================
@@ -261,10 +280,11 @@ $action = New-ScheduledTaskAction `
 #
 # Start 1 minute from now.
 #
-# Then repeat at the selected interval indefinitely.
+# Then repeat at the selected interval.
 # ============================================================
 
 $startTime = (Get-Date).AddMinutes(1)
+
 
 $trigger = New-ScheduledTaskTrigger `
     -Once `
@@ -282,7 +302,7 @@ $trigger = New-ScheduledTaskTrigger `
 #
 # InteractiveToken means:
 #
-#   Run only when user is logged on
+#   Run only when the user is logged in.
 #
 # This is important for Outlook COM.
 # ============================================================
@@ -321,7 +341,7 @@ Register-ScheduledTask `
     -Trigger $trigger `
     -Principal $principal `
     -Settings $settings `
-    -Description "Automatically runs the Worklog Outlook ICS importer."
+    -Description "Automatically runs the Worklog Outlook ICS importer silently."
 
 
 # ============================================================
@@ -349,6 +369,11 @@ Write-Host "  Every $intervalMinutes minute(s)"
 
 Write-Host ""
 
+Write-Host "Window:"
+Write-Host "  Hidden"
+
+Write-Host ""
+
 Write-Host "The first run will occur around:"
 Write-Host "  $startTime"
 
@@ -358,12 +383,14 @@ Write-Host "It will run only while you are logged into Windows."
 
 Write-Host ""
 
+
 # ============================================================
 # ASK WHETHER TO RUN NOW
 # ============================================================
 
 $runNow = Read-Host `
     "Run the scheduled task now as a test? [Y/n]"
+
 
 if (
     [string]::IsNullOrWhiteSpace($runNow) -or
@@ -376,20 +403,21 @@ if (
     Start-ScheduledTask `
         -TaskName $taskName
 
-    Start-Sleep -Seconds 3
+    Write-Host ""
 
-    $task = Get-ScheduledTask `
-        -TaskName $taskName
+    Write-Host "Task started."
 
     Write-Host ""
 
-    Write-Host "Task state:"
-    Write-Host "  $($task.State)"
+    Write-Host "Because the task runs hidden, you will not see"
+    Write-Host "a PowerShell window appear."
 
     Write-Host ""
 
-    Write-Host "The PowerShell script should now be running."
+    Write-Host "You can check Task Scheduler to confirm the"
+    Write-Host "task is running/completing successfully."
 }
+
 
 Write-Host ""
 Write-Host "Setup complete."
