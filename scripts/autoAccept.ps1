@@ -10,8 +10,6 @@ $ErrorActionPreference = "Stop"
 
 $SubjectSearch = "Work Log ICS:"
 $AttachmentName = "time.ics"
-$TargetCategory = "WorkLog Processed"
-$RuleName = "Archive WorkLog Processed Emails"
 $TempICS = Join-Path $env:TEMP "worklog-time.ics"
 
 $script:StartedOutlookByScript = $false
@@ -55,92 +53,6 @@ function Connect-Outlook {
     }
 
     return $outlook
-}
-
-# ============================================================
-# ENSURE OUTLOOK RULE EXISTS (FIXED COM METHOD INVOCATION)
-# ============================================================
-
-function Ensure-OutlookRule {
-    param(
-        $Namespace,
-        $OutlookStore
-    )
-
-    Write-Host ""
-    Write-Host "Checking Outlook rules..."
-
-    $session = $Namespace
-    $stores = $session.Stores
-    $targetStore = $null
-
-    foreach ($store in $stores) {
-        if ($store.DisplayName -eq $OutlookStore.DisplayName) {
-            $targetStore = $store
-            break
-        }
-    }
-
-    if ($null -eq $targetStore) {
-        $targetStore = $session.DefaultStore
-    }
-
-    $rules = $null
-    $ruleExists = $false
-
-    try {
-        $rules = $targetStore.GetRules()
-        foreach ($r in $rules) {
-            if ($r.Name -eq $RuleName) {
-                $ruleExists = $true
-                break
-            }
-        }
-
-        if (-not $ruleExists) {
-            Write-Host "Creating Outlook rule: '$RuleName'..."
-            
-            # Use PowerShell dispatch invocation bypass to explicitly trigger the COM Add method
-            $newRule = [Microsoft.VisualBasic.Interaction]::CallByName($rules, "Add", [Microsoft.VisualBasic.CallType]::Method, $RuleName, 0)
-            
-            $categoryCondition = $newRule.Conditions.Category
-            $categoryCondition.Enabled = $true
-            $categoryCondition.Categories = @($TargetCategory)
-
-            $archiveFolder = $null
-            try {
-                $archiveFolder = $Namespace.GetDefaultFolder(23)
-            }
-            catch {
-                $archiveFolder = $Namespace.GetDefaultFolder(3)
-            }
-
-            if ($null -ne $archiveFolder) {
-                $moveAction = $newRule.Actions.Move
-                $moveAction.Enabled = $true
-                $moveAction.Folder = $archiveFolder
-
-                $rules.Save()
-                Write-Host "✓ Outlook rule created successfully."
-                [Runtime.InteropServices.Marshal]::ReleaseComObject($archiveFolder) | Out-Null
-            }
-            else {
-                Write-Host "Warning: Could not resolve target folder for the rule action."
-            }
-
-            [Runtime.InteropServices.Marshal]::ReleaseComObject($newRule) | Out-Null
-        }
-        else {
-            Write-Host "✓ Outlook rule already exists."
-        }
-    }
-    catch {
-        Write-Host "Warning: Could not verify or create Outlook rule automatically: $_"
-    }
-    finally {
-        if ($rules) { [Runtime.InteropServices.Marshal]::ReleaseComObject($rules) | Out-Null }
-        if ($targetStore) { [Runtime.InteropServices.Marshal]::ReleaseComObject($targetStore) | Out-Null }
-    }
 }
 
 # ============================================================
@@ -276,8 +188,6 @@ try {
     $inbox = $namespace.GetDefaultFolder(6)
     $calendar = $namespace.GetDefaultFolder(9)
 
-    Ensure-OutlookRule -Namespace $namespace -OutlookStore $inbox.Store
-
     Write-Host ""
     Write-Host "Scanning Inbox items directly..."
 
@@ -288,11 +198,6 @@ try {
     for ($index = 1; $index -le $count; $index++) {
         $mail = $items.Item($index)
         if ($mail.Class -eq 43 -and $mail.Subject -like "*$SubjectSearch*") {
-            if ($mail.Categories -like "*$TargetCategory*") {
-                [Runtime.InteropServices.Marshal]::ReleaseComObject($mail) | Out-Null
-                continue
-            }
-
             $hasTargetAttachment = $false
             foreach ($att in $mail.Attachments) {
                 if ($att.FileName -ieq $AttachmentName) {
@@ -313,7 +218,7 @@ try {
     [Runtime.InteropServices.Marshal]::ReleaseComObject($items) | Out-Null
 
     if ($null -eq $targetMail) {
-        Write-Host "No new unprocessed Work Log ICS emails found."
+        Write-Host "No Work Log ICS emails found."
     }
     else {
         Write-Host "Found matching email: $($targetMail.Subject)"
@@ -388,24 +293,26 @@ try {
             }
         }
 
+        # MOVE TO DELETED ITEMS VIA COM METHOD
         Write-Host ""
-        Write-Host "Applying category '$TargetCategory' to the email..."
+        Write-Host "Moving processed email to Deleted Items..."
         try {
-            $mailToCategorize = if ($null -ne $targetStoreID) { 
+            $mailToMove = if ($null -ne $targetStoreID) { 
                 $namespace.GetItemFromID($targetEntryID, $targetStoreID) 
             } else { 
                 $namespace.GetItemFromID($targetEntryID) 
             }
 
-            if ($null -ne $mailToCategorize) {
-                $mailToCategorize.Categories = $TargetCategory
-                $mailToCategorize.Save()
-                [Runtime.InteropServices.Marshal]::ReleaseComObject($mailToCategorize) | Out-Null
-                Write-Host "✓ Email successfully categorized."
+            if ($null -ne $mailToMove) {
+                $destFolder = $namespace.GetDefaultFolder(3)
+                $mailToMove.Move($destFolder)
+                [Runtime.InteropServices.Marshal]::ReleaseComObject($destFolder) | Out-Null
+                [Runtime.InteropServices.Marshal]::ReleaseComObject($mailToMove) | Out-Null
+                Write-Host "✓ Email successfully moved."
             }
         }
         catch {
-            Write-Host "Warning: Could not categorize email: $_"
+            Write-Host "Warning: Direct move encountered issue: $_"
         }
     }
 
