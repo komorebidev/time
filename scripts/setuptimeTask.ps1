@@ -1,4 +1,3 @@
-```powershell
 # ============================================================
 # Interactive Scheduled Task Setup
 #
@@ -495,4 +494,3 @@ if (
 Write-Host ""
 Write-Host "Setup complete."
 Write-Host ""
-```
