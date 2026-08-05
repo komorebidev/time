@@ -1,33 +1,21 @@
 # ============================================================
 # Worklog ICS -> Outlook Calendar
 #
-# Reads newest email containing:
-#
-#     Work Log ICS:
-#
-# with a time.ics attachment.
-#
 # Uses classic Outlook COM/MAPI.
 #
 # Handles:
-#   - Multiple VEVENTs
-#   - All-day events
-#   - Descriptions
-#   - Locations
-#   - Out Of Office events
+#   - Work Log ICS emails
+#   - time.ics attachments
+#   - Multiple VEVENT entries
 #   - Duplicate prevention
-#   - Updating existing events
-#   - Outlook startup timing problems
-#
-# NEW:
-#   - Outlook started only through COM
-#   - Outlook closed cleanly after import
-#   - Existing Outlook sessions are not closed
+#   - Calendar updates
+#   - Outlook COM startup/retry handling
 #
 # ============================================================
 
 
 $ErrorActionPreference = "Stop"
+
 
 
 
@@ -43,23 +31,24 @@ $AttachmentName = "time.ics"
 $ProcessedCategory = "WorkLog Imported"
 
 
-$TempICS = Join-Path `
-    $env:TEMP `
-    "worklog-time.ics"
+
+$TempICS =
+    Join-Path `
+        $env:TEMP `
+        "worklog-time.ics"
+
 
 
 
 
 # ============================================================
-# OUTLOOK SESSION TRACKING
+# OUTLOOK OWNERSHIP TRACKING
 #
-# True:
-#   Script created Outlook session.
+# If this script starts Outlook:
+#     close it afterwards.
 #
-# False:
-#   Outlook was already running.
-#
-# Only close Outlook when this script owns it.
+# If Outlook was already running:
+#     leave it alone.
 #
 # ============================================================
 
@@ -69,74 +58,33 @@ $script:StartedOutlookByScript = $false
 
 
 
-
 # ============================================================
-# CONNECT TO OUTLOOK WITH RETRIES
+# CONNECT TO OUTLOOK
 #
-# Does NOT use Start-Process.
+# Handles:
 #
-# Outlook COM launches Outlook when required.
+#   RPC_E_CALL_REJECTED
+#   Outlook startup delay
+#   Existing Outlook sessions
 #
-# This avoids:
-#   - Visible startup windows
-#   - Startup race conditions
-#   - WindowStyle issues
+# Order:
+#
+#   1. Attach to existing COM instance
+#   2. Create Outlook COM instance
+#   3. Wait for MAPI availability
 #
 # ============================================================
 
 function Connect-Outlook {
 
 
-    $maxAttempts = 12
+    $maxAttempts = 18
 
-    $delaySeconds = 5
-
-
-
-
-    # --------------------------------------------------------
-    # Check existing Outlook process
-    # --------------------------------------------------------
-
-    $outlookProcess =
-        Get-Process `
-            -Name OUTLOOK `
-            -ErrorAction SilentlyContinue
+    $delaySeconds = 10
 
 
 
 
-    if ($null -eq $outlookProcess) {
-
-
-        Write-Host ""
-
-        Write-Host "Outlook desktop is not running."
-
-        Write-Host "Starting through COM..."
-
-
-
-        $script:StartedOutlookByScript = $true
-
-    }
-    else {
-
-
-        Write-Host ""
-
-        Write-Host "Outlook desktop already running."
-
-    }
-
-
-
-
-
-
-    # --------------------------------------------------------
-    # Connect COM with retry
-    # --------------------------------------------------------
 
     for (
         $attempt = 1;
@@ -150,50 +98,95 @@ function Connect-Outlook {
 
             Write-Host ""
 
-            Write-Host "Connecting to Outlook COM..."
+            Write-Host "Connecting to Outlook..."
 
             Write-Host "Attempt $attempt of $maxAttempts"
 
 
 
 
-            $outlook =
-                New-Object `
-                    -ComObject Outlook.Application
+
+            # ------------------------------------------------
+            # Try existing Outlook COM instance first
+            # ------------------------------------------------
+
+            try {
+
+
+                $outlook =
+                    [Runtime.InteropServices.Marshal]::GetActiveObject(
+                        "Outlook.Application"
+                    )
+
+
+                Write-Host "✓ Connected to existing Outlook COM"
+
+
+
+            }
+            catch {
+
+
+                Write-Host "No active Outlook COM session."
+
+
+
+                $outlook =
+                    New-Object `
+                        -ComObject Outlook.Application
+
+
+
+                $script:StartedOutlookByScript = $true
+
+
+
+                Write-Host "✓ Started Outlook COM"
+
+            }
 
 
 
 
 
-            Write-Host "✓ Outlook COM connected"
 
 
+            # ------------------------------------------------
+            # Test MAPI
+            # ------------------------------------------------
 
-
-            Write-Host "Checking MAPI profile..."
+            Write-Host "Checking MAPI..."
 
 
 
             $namespace =
-                $outlook.GetNamespace("MAPI")
+                $outlook.GetNamespace(
+                    "MAPI"
+                )
+
+
+
+            # Force Outlook readiness check
+
+            $folders =
+                $namespace.Folders.Count
+
+
+
+            Write-Host "✓ MAPI ready"
 
 
 
 
-            Write-Host "✓ MAPI available"
-
-
-
-
-            # Release temporary namespace object
 
             if ($namespace) {
 
 
-                [System.Runtime.InteropServices.Marshal]::ReleaseComObject(
+                [Runtime.InteropServices.Marshal]::ReleaseComObject(
                     $namespace
                 ) | Out-Null
             }
+
 
 
 
@@ -208,19 +201,36 @@ function Connect-Outlook {
 
             Write-Host ""
 
-            Write-Host "Outlook not ready."
+            Write-Host "Outlook COM not ready."
 
             Write-Host $_.Exception.Message
+
+
+
+
+
+            # RPC_E_CALL_REJECTED
+
+            if (
+                $_.Exception.HResult -eq -2147418111
+            ) {
+
+
+                Write-Host ""
+
+                Write-Host "Outlook rejected COM request."
+
+                Write-Host "Retrying..."
+
+            }
+
+
 
 
 
             if (
                 $attempt -lt $maxAttempts
             ) {
-
-
-                Write-Host "Waiting $delaySeconds seconds..."
-
 
 
                 Start-Sleep `
@@ -237,12 +247,6 @@ function Connect-Outlook {
         }
     }
 }
-
-
-
-
-
-
 
 # ============================================================
 # ICS TEXT UNESCAPING
@@ -266,20 +270,16 @@ function Unescape-IcsText {
         $Text -replace '\\n', "`r`n"
 
 
-
     $Text =
         $Text -replace '\\N', "`r`n"
-
 
 
     $Text =
         $Text -replace '\\,', ","
 
 
-
     $Text =
         $Text -replace '\\;', ";"
-
 
 
     $Text =
@@ -317,6 +317,7 @@ function Parse-IcsDate {
 
         throw "ICS date value is empty."
     }
+
 
 
 
@@ -368,8 +369,17 @@ function Parse-IcsDate {
 
 
 
+
     throw "Unsupported ICS date format: $Value"
 }
+
+
+
+
+
+
+
+
 
 # ============================================================
 # READ ICS EVENTS
@@ -382,6 +392,7 @@ function Read-IcsEvents {
     )
 
 
+
     $raw =
         [System.IO.File]::ReadAllText(
             $Path,
@@ -389,13 +400,19 @@ function Read-IcsEvents {
         )
 
 
+
+
+
     # Normalize line endings
 
     $raw =
         $raw -replace "`r`n", "`n"
 
+
     $raw =
         $raw -replace "`r", "`n"
+
+
 
 
 
@@ -406,14 +423,20 @@ function Read-IcsEvents {
 
 
 
+
+
     $lines =
         $raw -split "`n"
+
+
 
 
 
     $events = @()
 
     $current = $null
+
+
 
 
 
@@ -425,12 +448,17 @@ function Read-IcsEvents {
 
 
 
-        if ($line -eq "BEGIN:VEVENT") {
 
 
-            $current = @{
-                Properties = @{}
-            }
+        if (
+            $line -eq "BEGIN:VEVENT"
+        ) {
+
+
+            $current =
+                @{
+                    Properties = @{}
+                }
 
 
             continue
@@ -439,12 +467,18 @@ function Read-IcsEvents {
 
 
 
-        if ($line -eq "END:VEVENT") {
+
+
+        if (
+            $line -eq "END:VEVENT"
+        ) {
 
 
             if ($null -ne $current) {
 
+
                 $events += $current
+
             }
 
 
@@ -457,10 +491,15 @@ function Read-IcsEvents {
 
 
 
+
+
         if ($null -eq $current) {
+
 
             continue
         }
+
+
 
 
 
@@ -471,10 +510,16 @@ function Read-IcsEvents {
 
 
 
-        if ($parts.Count -ne 2) {
+
+        if (
+            $parts.Count -ne 2
+        ) {
+
 
             continue
         }
+
+
 
 
 
@@ -489,8 +534,12 @@ function Read-IcsEvents {
 
 
 
+
+
         $propertyName =
             ($propertyPart -split ";")[0].ToUpper()
+
+
 
 
 
@@ -501,24 +550,18 @@ function Read-IcsEvents {
 
 
 
+
     return $events
 }
-
-
-
-
-
-
-
 
 # ============================================================
 # FIND EXISTING WORKLOG EVENT
 #
-# Uses custom Outlook property:
+# Uses Outlook custom property:
 #
 #     WorklogUID
 #
-# Prevents duplicates.
+# Prevents duplicate calendar entries.
 #
 # ============================================================
 
@@ -543,6 +586,8 @@ function Find-ExistingWorklogEvent {
 
 
 
+
+
         foreach ($item in $items) {
 
 
@@ -559,7 +604,9 @@ function Find-ExistingWorklogEvent {
 
 
 
+
                 $property = $null
+
 
 
 
@@ -573,6 +620,8 @@ function Find-ExistingWorklogEvent {
 
 
 
+
+
                     if (
                         $null -ne $property -and
                         $property.Value -eq $UID
@@ -583,6 +632,7 @@ function Find-ExistingWorklogEvent {
                     }
 
 
+
                 }
                 finally {
 
@@ -590,19 +640,18 @@ function Find-ExistingWorklogEvent {
                     if ($property) {
 
 
-                        [System.Runtime.InteropServices.Marshal]::ReleaseComObject(
+                        [Runtime.InteropServices.Marshal]::ReleaseComObject(
                             $property
                         ) | Out-Null
                     }
                 }
 
 
-
             }
             catch {
 
 
-                # Ignore invalid calendar items
+                # Ignore invalid calendar entries
 
             }
         }
@@ -616,7 +665,7 @@ function Find-ExistingWorklogEvent {
         if ($items) {
 
 
-            [System.Runtime.InteropServices.Marshal]::ReleaseComObject(
+            [Runtime.InteropServices.Marshal]::ReleaseComObject(
                 $items
             ) | Out-Null
         }
@@ -624,9 +673,10 @@ function Find-ExistingWorklogEvent {
 
 
 
+
+
     return $null
 }
-
 
 
 
@@ -669,6 +719,7 @@ function Find-WorklogEmails {
 
 
 
+
     try {
 
 
@@ -680,16 +731,19 @@ function Find-WorklogEmails {
 
 
 
+
         foreach ($mail in $items) {
 
 
 
-            # MailItem only
+            # Only MailItem
 
             if ($mail.Class -ne 43) {
 
+
                 continue
             }
+
 
 
 
@@ -701,9 +755,12 @@ function Find-WorklogEmails {
 
 
 
+
+
             if (
                 $subject -notlike "*$SubjectSearch*"
             ) {
+
 
                 continue
             }
@@ -712,8 +769,12 @@ function Find-WorklogEmails {
 
 
 
+
+
             $hasAttachment =
                 $false
+
+
 
 
 
@@ -726,8 +787,11 @@ function Find-WorklogEmails {
 
 
 
+
                 $attachment =
                     $mail.Attachments.Item($i)
+
+
 
 
 
@@ -737,13 +801,16 @@ function Find-WorklogEmails {
                 ) {
 
 
+
                     $hasAttachment =
                         $true
+
 
 
                     break
                 }
             }
+
 
 
 
@@ -758,6 +825,7 @@ function Find-WorklogEmails {
 
 
 
+
     }
     finally {
 
@@ -765,11 +833,12 @@ function Find-WorklogEmails {
         if ($items) {
 
 
-            [System.Runtime.InteropServices.Marshal]::ReleaseComObject(
+            [Runtime.InteropServices.Marshal]::ReleaseComObject(
                 $items
             ) | Out-Null
         }
     }
+
 
 
 
@@ -794,6 +863,7 @@ $mailItems = $null
 $targetMail = $null
 
 $icsAttachment = $null
+
 
 
 
@@ -825,22 +895,26 @@ try {
 
 
 
+
     # ========================================================
     # ACCESS MAPI
     # ========================================================
 
     Write-Host ""
 
-    Write-Host "Accessing Outlook profile..."
+    Write-Host "Loading Outlook profile..."
 
 
 
     $namespace =
-        $outlook.GetNamespace("MAPI")
+        $outlook.GetNamespace(
+            "MAPI"
+        )
 
 
 
-    Write-Host "✓ MAPI accessed"
+    Write-Host "✓ MAPI loaded"
+
 
 
 
@@ -855,8 +929,10 @@ try {
         $namespace.GetDefaultFolder(6)
 
 
+
     $calendar =
         $namespace.GetDefaultFolder(9)
+
 
 
 
@@ -864,6 +940,7 @@ try {
 
     Write-Host "Inbox:"
     Write-Host $inbox.FolderPath
+
 
 
     Write-Host ""
@@ -875,8 +952,10 @@ try {
 
 
 
+
+
     # ========================================================
-    # FIND EMAILS
+    # FIND WORKLOG EMAILS
     # ========================================================
 
     Write-Host ""
@@ -893,15 +972,19 @@ try {
 
 
 
-    if ($matchingEmails.Count -eq 0) {
+
+    if (
+        $matchingEmails.Count -eq 0
+    ) {
 
 
         Write-Host ""
 
-        Write-Host "No matching emails found."
+        Write-Host "No Work Log ICS emails found."
 
         exit 0
     }
+
 
 
 
@@ -911,6 +994,7 @@ try {
 
     $targetMail =
         $matchingEmails[0]
+
 
 
 
@@ -927,16 +1011,21 @@ try {
 
 
 
+
+
+
     # ========================================================
-    # REMOVE OLD EMAILS
+    # DELETE OLDER MATCHING EMAILS
     # ========================================================
 
-    if ($matchingEmails.Count -gt 1) {
+    if (
+        $matchingEmails.Count -gt 1
+    ) {
 
 
         Write-Host ""
 
-        Write-Host "Removing older Work Log emails..."
+        Write-Host "Deleting older matching emails..."
 
 
 
@@ -951,15 +1040,17 @@ try {
         }
 
 
-        Write-Host "✓ Old emails removed"
+        Write-Host "✓ Old emails deleted"
     }
 
 
 
 
 
+
+
     # ========================================================
-    # FIND ICS ATTACHMENT
+    # FIND TIME.ICS ATTACHMENT
     # ========================================================
 
     for (
@@ -971,6 +1062,8 @@ try {
 
         $attachment =
             $targetMail.Attachments.Item($i)
+
+
 
 
 
@@ -991,6 +1084,8 @@ try {
 
 
 
+
+
     if ($null -eq $icsAttachment) {
 
 
@@ -1001,11 +1096,14 @@ try {
 
 
 
+
     # ========================================================
-    # SAVE ICS
+    # SAVE ICS FILE
     # ========================================================
 
-    if (Test-Path $TempICS) {
+    if (
+        Test-Path $TempICS
+    ) {
 
 
         Remove-Item `
@@ -1013,6 +1111,7 @@ try {
             -Force `
             -ErrorAction SilentlyContinue
     }
+
 
 
 
@@ -1041,13 +1140,18 @@ try {
 
     $events =
         Read-IcsEvents `
-            $TempICS
+            -Path $TempICS
+
+
 
 
 
     Write-Host ""
 
-    Write-Host "Events found: $($events.Count)"
+    Write-Host "Events found:"
+    Write-Host $events.Count
+
+
 
 
 
@@ -1063,11 +1167,14 @@ try {
 
 
 
+
     # ========================================================
     # PROCESS EVENTS
     # ========================================================
 
-    foreach ($icsEvent in $events) {
+    foreach (
+        $icsEvent in $events
+    ) {
 
 
 
@@ -1077,8 +1184,10 @@ try {
 
 
 
+
         $uid =
             $properties["UID"]
+
 
 
 
@@ -1095,6 +1204,7 @@ try {
 
             continue
         }
+
 
 
 
@@ -1134,10 +1244,12 @@ try {
                 )
 
 
+
             $end =
                 Parse-IcsDate(
                     $properties["DTEND"]
                 )
+
 
         }
         catch {
@@ -1145,12 +1257,13 @@ try {
 
             Write-Host ""
 
-            Write-Host "Skipping invalid date."
+            Write-Host "Invalid date. Skipping."
 
             $skippedCount++
 
             continue
         }
+
 
 
 
@@ -1163,16 +1276,9 @@ try {
         Write-Host "Processing:"
         Write-Host $summary
 
-        Write-Host "UID:"
-        Write-Host $uid
 
 
 
-
-
-        # ====================================================
-        # CHECK EXISTING EVENT
-        # ====================================================
 
         $existing =
             Find-ExistingWorklogEvent `
@@ -1184,14 +1290,18 @@ try {
 
 
 
+
         # ====================================================
-        # CREATE EVENT
+        # CREATE NEW EVENT
         # ====================================================
 
-        if ($null -eq $existing) {
+        if (
+            $null -eq $existing
+        ) {
 
 
             Write-Host "Action: CREATE"
+
 
 
 
@@ -1206,24 +1316,30 @@ try {
                 $summary
 
 
+
             $appointment.Start =
                 $start
+
 
 
             $appointment.End =
                 $end
 
 
+
             $appointment.AllDayEvent =
                 $true
+
 
 
             $appointment.Body =
                 $description
 
 
+
             $appointment.Location =
                 $location
+
 
 
 
@@ -1247,6 +1363,7 @@ try {
 
 
 
+
             $uidProperty =
                 $appointment.UserProperties.Add(
                     "WorklogUID",
@@ -1258,6 +1375,7 @@ try {
 
             $uidProperty.Value =
                 $uid
+
 
 
 
@@ -1275,7 +1393,7 @@ try {
 
 
 
-            [System.Runtime.InteropServices.Marshal]::ReleaseComObject(
+            [Runtime.InteropServices.Marshal]::ReleaseComObject(
                 $appointment
             ) | Out-Null
         }
@@ -1295,20 +1413,25 @@ try {
                 $summary
 
 
+
             $existing.Start =
                 $start
+
 
 
             $existing.End =
                 $end
 
 
+
             $existing.AllDayEvent =
                 $true
 
 
+
             $existing.Body =
                 $description
+
 
 
             $existing.Location =
@@ -1351,7 +1474,7 @@ try {
 
 
 
-            [System.Runtime.InteropServices.Marshal]::ReleaseComObject(
+            [Runtime.InteropServices.Marshal]::ReleaseComObject(
                 $existing
             ) | Out-Null
         }
@@ -1359,6 +1482,7 @@ try {
 
 
         Write-Host ""
+
     }
 
 
@@ -1368,7 +1492,7 @@ try {
 
 
     # ========================================================
-    # MARK AND DELETE IMPORTED EMAIL
+    # MARK AND DELETE PROCESSED EMAIL
     # ========================================================
 
     if ($targetMail) {
@@ -1376,7 +1500,7 @@ try {
 
         Write-Host ""
 
-        Write-Host "Marking imported email..."
+        Write-Host "Marking processed email..."
 
 
 
@@ -1394,10 +1518,9 @@ try {
 
 
 
-
         Write-Host ""
 
-        Write-Host "Deleting imported email..."
+        Write-Host "Deleting processed email..."
 
 
 
@@ -1416,7 +1539,7 @@ try {
 
 
     # ========================================================
-    # SUMMARY
+    # FINAL SUMMARY
     # ========================================================
 
     Write-Host ""
@@ -1427,27 +1550,29 @@ try {
 
     Write-Host "========================================"
 
+
     Write-Host ""
 
-    Write-Host "Events found:"
+    Write-Host "Events:"
     Write-Host $events.Count
+
 
     Write-Host ""
 
     Write-Host "Created:"
     Write-Host $createdCount
 
+
     Write-Host ""
 
     Write-Host "Updated:"
     Write-Host $updatedCount
 
+
     Write-Host ""
 
     Write-Host "Skipped:"
     Write-Host $skippedCount
-
-
 
 
 
@@ -1489,7 +1614,9 @@ finally {
     # REMOVE TEMP ICS
     # ========================================================
 
-    if (Test-Path $TempICS) {
+    if (
+        Test-Path $TempICS
+    ) {
 
 
         Remove-Item `
@@ -1505,7 +1632,7 @@ finally {
     # ========================================================
     # RELEASE CHILD COM OBJECTS
     #
-    # Release children before Outlook.
+    # Children first, Outlook last.
     #
     # ========================================================
 
@@ -1527,7 +1654,7 @@ finally {
             try {
 
 
-                [System.Runtime.InteropServices.Marshal]::ReleaseComObject(
+                [Runtime.InteropServices.Marshal]::ReleaseComObject(
                     $comObject
                 ) | Out-Null
 
@@ -1535,8 +1662,7 @@ finally {
             }
             catch {
 
-
-                # Ignore cleanup failures
+                # Ignore cleanup errors
 
             }
         }
@@ -1582,7 +1708,7 @@ finally {
 
             Write-Host ""
 
-            Write-Host "Outlook did not close cleanly."
+            Write-Host "Failed to close Outlook normally."
 
             Write-Host $_.Exception.Message
 
@@ -1593,8 +1719,9 @@ finally {
 
 
 
+
     # ========================================================
-    # RELEASE OUTLOOK COM OBJECT LAST
+    # RELEASE OUTLOOK COM
     # ========================================================
 
     if ($outlook) {
@@ -1603,15 +1730,13 @@ finally {
         try {
 
 
-            [System.Runtime.InteropServices.Marshal]::ReleaseComObject(
+            [Runtime.InteropServices.Marshal]::ReleaseComObject(
                 $outlook
             ) | Out-Null
 
 
         }
         catch {
-
-            # Ignore
 
         }
     }
@@ -1621,7 +1746,7 @@ finally {
 
 
     # ========================================================
-    # FINAL COM CLEANUP
+    # FORCE FINAL COM CLEANUP
     # ========================================================
 
     [GC]::Collect()
