@@ -5,13 +5,13 @@
 #
 # Handles:
 #   - Work Log ICS emails
-#   - time.ics attachments
+#   - time.ics attachments (with forced immediate file release & deletion)
 #   - Multiple VEVENT entries
 #   - Advanced duplicate prevention (UID + Subject/Date fallback)
 #   - Calendar updates
 #   - Background COM instantiation (completely avoids UI popups)
 #   - Deleting older matching emails
-#   - Deleting the newest imported email after successful processing
+#   - Deleting the newest imported email reliably via EntryID
 #   - Safe process cleanup upon completion
 #
 # ============================================================
@@ -242,7 +242,6 @@ function Find-ExistingWorklogEvent {
                 # 2. Fallback check via Subject + Start Date to catch legacy/un-tagged duplicates
                 if ($item.Subject -eq $Summary) {
                     $itemStart = [datetime]$item.Start
-                    # Compare date portions to safely match all-day or timed events
                     if ($itemStart.Date -eq $Start.Date) {
                         return $item
                     }
@@ -347,6 +346,7 @@ $namespace = $null
 $inbox = $null
 $calendar = $null
 $targetMail = $null
+$targetEntryID = $null
 $icsAttachment = $null
 $createdCount = 0
 $updatedCount = 0
@@ -405,6 +405,9 @@ try {
     Write-Host $targetMail.Subject
     Write-Host $targetMail.ReceivedTime
 
+    # CAPTURE ENTRY ID AND RELEASE TARGET MAIL POINTER
+    $targetEntryID = $targetMail.EntryID
+
     # DELETE OLDER EMAILS
     if ($matchingEmails.Count -gt 1) {
         Write-Host ""
@@ -440,20 +443,31 @@ try {
         throw "time.ics attachment not found."
     }
 
-    # SAVE ICS FILE
+    # CLEAR ANY LINGERING TEMP ICS FILE FIRST
     if (Test-Path $TempICS) {
         Remove-Item $TempICS -Force -ErrorAction SilentlyContinue
     }
 
     Write-Host ""
     Write-Host "Saving ICS..."
-
     $icsAttachment.SaveAsFile($TempICS)
-
     Write-Host "✓ ICS saved"
 
     # PARSE EVENTS
     $events = Read-IcsEvents -Path $TempICS
+
+    # RELEASE ATTACHMENT COM OBJECT AND TARGET MAIL IMMEDIATELY SO FILE LOCK CLEARS
+    [Runtime.InteropServices.Marshal]::ReleaseComObject($icsAttachment) | Out-Null
+    $icsAttachment = $null
+
+    [Runtime.InteropServices.Marshal]::ReleaseComObject($targetMail) | Out-Null
+    $targetMail = $null
+
+    # FORCE DELETE TEMP ICS FILE IMMEDIATELY AFTER PARSING
+    if (Test-Path $TempICS) {
+        Remove-Item $TempICS -Force -ErrorAction SilentlyContinue
+        Write-Host "✓ Temporary ICS file cleaned up"
+    }
 
     Write-Host ""
     Write-Host "Events found:"
@@ -552,15 +566,22 @@ try {
         }
     }
 
-    # DELETE THE NEWEST IMPORTED EMAIL AFTER SUCCESSFUL PROCESSING
+    # DELETE THE NEWEST IMPORTED EMAIL VIA ENTRY ID AFTER SUCCESSFUL PROCESSING
     Write-Host ""
     Write-Host "Deleting successfully processed newest email..."
     try {
-        $targetMail.Delete()
-        Write-Host "✓ Imported email deleted"
+        $mailToDelete = $inbox.Items.Find("[EntryID] = '$targetEntryID'")
+        if ($null -ne $mailToDelete) {
+            $mailToDelete.Delete()
+            [Runtime.InteropServices.Marshal]::ReleaseComObject($mailToDelete) | Out-Null
+            Write-Host "✓ Imported email deleted successfully"
+        }
+        else {
+            Write-Host "Warning: Email already removed or not found by EntryID."
+        }
     }
     catch {
-        Write-Host "Warning: Could not delete the imported email."
+        Write-Host "Warning: Could not delete the imported email: $_"
     }
 
 }
@@ -576,7 +597,7 @@ finally {
     [GC]::Collect()
     [GC]::WaitForPendingFinalizers()
 
-    # Clean up temp file
+    # Final safety check to delete temp file if it somehow still exists
     if (Test-Path $TempICS) {
         Remove-Item $TempICS -Force -ErrorAction SilentlyContinue
     }
