@@ -74,7 +74,6 @@ function Ensure-OutlookRule {
     $stores = $session.Stores
     $targetStore = $null
 
-    # Find the store matching the current profile/mailbox
     foreach ($store in $stores) {
         if ($store.DisplayName -eq $OutlookStore.DisplayName) {
             $targetStore = $store
@@ -101,21 +100,18 @@ function Ensure-OutlookRule {
         if (-not $ruleExists) {
             Write-Host "Creating Outlook rule: '$RuleName'..."
             
-            # 0 = olRuleReceive (Run when new message arrives)
             $newRule = $rules.Add($RuleName, 0)
             
-            # Condition: Has specific category
             $categoryCondition = $newRule.Conditions.Category
             $categoryCondition.Enabled = $true
             $categoryCondition.Categories = @($TargetCategory)
 
-            # Action: Move to Archive folder (Default Folder type ID 23 or fallback to Deleted Items/Archive)
             $archiveFolder = $null
             try {
-                $archiveFolder = $Namespace.GetDefaultFolder(23) # Archive folder
+                $archiveFolder = $Namespace.GetDefaultFolder(23)
             }
             catch {
-                $archiveFolder = $Namespace.GetDefaultFolder(3)  # Deleted Items fallback
+                $archiveFolder = $Namespace.GetDefaultFolder(3)
             }
 
             if ($null -ne $archiveFolder) {
@@ -123,7 +119,6 @@ function Ensure-OutlookRule {
                 $moveAction.Enabled = $true
                 $moveAction.Folder = $archiveFolder
 
-                # Save the rules collection
                 $rules.Save()
                 Write-Host "✓ Outlook rule created successfully."
                 [Runtime.InteropServices.Marshal]::ReleaseComObject($archiveFolder) | Out-Null
@@ -262,6 +257,7 @@ $targetStoreID = $null
 $icsAttachment = $null
 $createdCount = 0
 $skippedCount = 0
+$scriptFailed = $false
 
 # ============================================================
 # MAIN
@@ -279,7 +275,6 @@ try {
     $inbox = $namespace.GetDefaultFolder(6)
     $calendar = $namespace.GetDefaultFolder(9)
 
-    # Check and create rule if missing
     Ensure-OutlookRule -Namespace $namespace -OutlookStore $inbox.Store
 
     Write-Host ""
@@ -292,7 +287,6 @@ try {
     for ($index = 1; $index -le $count; $index++) {
         $mail = $items.Item($index)
         if ($mail.Class -eq 43 -and $mail.Subject -like "*$SubjectSearch*") {
-            # Skip emails that have already been categorized by the script
             if ($mail.Categories -like "*$TargetCategory*") {
                 [Runtime.InteropServices.Marshal]::ReleaseComObject($mail) | Out-Null
                 continue
@@ -319,103 +313,109 @@ try {
 
     if ($null -eq $targetMail) {
         Write-Host "No new unprocessed Work Log ICS emails found."
-        exit 0
     }
+    else {
+        Write-Host "Found matching email: $($targetMail.Subject)"
+        
+        $targetEntryID = $targetMail.EntryID
+        try { $targetStoreID = $targetMail.StoreID } catch { $targetStoreID = $null }
 
-    Write-Host "Found matching email: $($targetMail.Subject)"
-    
-    $targetEntryID = $targetMail.EntryID
-    try { $targetStoreID = $targetMail.StoreID } catch { $targetStoreID = $null }
-
-    # Extract attachment
-    foreach ($att in $targetMail.Attachments) {
-        if ($att.FileName -ieq $AttachmentName) {
-            $icsAttachment = $att
-            break
+        foreach ($att in $targetMail.Attachments) {
+            if ($att.FileName -ieq $AttachmentName) {
+                $icsAttachment = $att
+                break
+            }
+            [Runtime.InteropServices.Marshal]::ReleaseComObject($att) | Out-Null
         }
-        [Runtime.InteropServices.Marshal]::ReleaseComObject($att) | Out-Null
-    }
 
-    if ($null -eq $icsAttachment) {
-        throw "time.ics attachment not found on target email."
-    }
+        if ($null -eq $icsAttachment) {
+            throw "time.ics attachment not found on target email."
+        }
 
-    if (Test-Path $TempICS) { Remove-Item $TempICS -Force -ErrorAction SilentlyContinue }
-    $icsAttachment.SaveAsFile($TempICS)
-    
-    $events = Read-IcsEvents -Path $TempICS
+        if (Test-Path $TempICS) { Remove-Item $TempICS -Force -ErrorAction SilentlyContinue }
+        $icsAttachment.SaveAsFile($TempICS)
+        
+        $events = Read-IcsEvents -Path $TempICS
 
-    [Runtime.InteropServices.Marshal]::ReleaseComObject($icsAttachment) | Out-Null
-    $icsAttachment = $null
-    [Runtime.InteropServices.Marshal]::ReleaseComObject($targetMail) | Out-Null
-    $targetMail = $null
+        [Runtime.InteropServices.Marshal]::ReleaseComObject($icsAttachment) | Out-Null
+        $icsAttachment = $null
+        [Runtime.InteropServices.Marshal]::ReleaseComObject($targetMail) | Out-Null
+        $targetMail = $null
 
-    if (Test-Path $TempICS) { Remove-Item $TempICS -Force -ErrorAction SilentlyContinue }
+        if (Test-Path $TempICS) { Remove-Item $TempICS -Force -ErrorAction SilentlyContinue }
 
-    foreach ($icsEvent in $events) {
-        $properties = $icsEvent.Properties
-        $uid = $properties["UID"]
-        if ([string]::IsNullOrWhiteSpace($uid)) { $skippedCount++; continue }
+        foreach ($icsEvent in $events) {
+            $properties = $icsEvent.Properties
+            $uid = $properties["UID"]
+            if ([string]::IsNullOrWhiteSpace($uid)) { $skippedCount++; continue }
 
-        $summary = Unescape-IcsText($properties["SUMMARY"])
-        $description = Unescape-IcsText($properties["DESCRIPTION"])
-        $location = Unescape-IcsText($properties["LOCATION"])
+            $summary = Unescape-IcsText($properties["SUMMARY"])
+            $description = Unescape-IcsText($properties["DESCRIPTION"])
+            $location = Unescape-IcsText($properties["LOCATION"])
 
+            try {
+                $start = Parse-IcsDate($properties["DTSTART"])
+                $end = Parse-IcsDate($properties["DTEND"])
+            }
+            catch {
+                $skippedCount++
+                continue
+            }
+
+            $existing = Find-ExistingWorklogEvent -Calendar $calendar -UID $uid -Summary $summary -Start $start
+
+            if ($null -eq $existing) {
+                $appointment = $calendar.Items.Add(1)
+                $appointment.Subject = $summary
+                $appointment.Start = $start
+                $appointment.End = $end
+                $appointment.AllDayEvent = $true
+                $appointment.Body = $description
+                $appointment.Location = $location
+                $appointment.BusyStatus = if ($summary -eq "Out of Office") { 3 } else { 2 }
+
+                $uidProperty = $appointment.UserProperties.Add("WorklogUID", 1, $false)
+                $uidProperty.Value = $uid
+                $appointment.Save()
+
+                [Runtime.InteropServices.Marshal]::ReleaseComObject($uidProperty) | Out-Null
+                [Runtime.InteropServices.Marshal]::ReleaseComObject($appointment) | Out-Null
+                $createdCount++
+            }
+            else {
+                $skippedCount++
+            }
+        }
+
+        Write-Host ""
+        Write-Host "Applying category '$TargetCategory' to the email..."
         try {
-            $start = Parse-IcsDate($properties["DTSTART"])
-            $end = Parse-IcsDate($properties["DTEND"])
+            $mailToCategorize = if ($null -ne $targetStoreID) { 
+                $namespace.GetItemFromID($targetEntryID, $targetStoreID) 
+            } else { 
+                $namespace.GetItemFromID($targetEntryID) 
+            }
+
+            if ($null -ne $mailToCategorize) {
+                $mailToCategorize.Categories = $TargetCategory
+                $mailToCategorize.Save()
+                [Runtime.InteropServices.Marshal]::ReleaseComObject($mailToCategorize) | Out-Null
+                Write-Host "✓ Email successfully categorized."
+            }
         }
         catch {
-            $skippedCount++
-            continue
-        }
-
-        $existing = Find-ExistingWorklogEvent -Calendar $calendar -UID $uid -Summary $summary -Start $start
-
-        if ($null -eq $existing) {
-            $appointment = $calendar.Items.Add(1)
-            $appointment.Subject = $summary
-            $appointment.Start = $start
-            $appointment.End = $end
-            $appointment.AllDayEvent = $true
-            $appointment.Body = $description
-            $appointment.Location = $location
-            $appointment.BusyStatus = if ($summary -eq "Out of Office") { 3 } else { 2 }
-
-            $uidProperty = $appointment.UserProperties.Add("WorklogUID", 1, $false)
-            $uidProperty.Value = $uid
-            $appointment.Save()
-
-            [Runtime.InteropServices.Marshal]::ReleaseComObject($uidProperty) | Out-Null
-            [Runtime.InteropServices.Marshal]::ReleaseComObject($appointment) | Out-Null
-            $createdCount++
-        }
-        else {
-            $skippedCount++
+            Write-Host "Warning: Could not categorize email: $_"
         }
     }
 
-    # APPLY CATEGORY TO THE PROCESSED EMAIL
+}
+catch {
+    $scriptFailed = $true
     Write-Host ""
-    Write-Host "Applying category '$TargetCategory' to the email..."
-    try {
-        $mailToCategorize = if ($null -ne $targetStoreID) { 
-            $namespace.GetItemFromID($targetEntryID, $targetStoreID) 
-        } else { 
-            $namespace.GetItemFromID($targetEntryID) 
-        }
-
-        if ($null -ne $mailToCategorize) {
-            $mailToCategorize.Categories = $TargetCategory
-            $mailToCategorize.Save()
-            [Runtime.InteropServices.Marshal]::ReleaseComObject($mailToCategorize) | Out-Null
-            Write-Host "✓ Email successfully categorized."
-        }
-    }
-    catch {
-        Write-Host "Warning: Could not categorize email: $_"
-    }
-
+    Write-Host "========================================"
+    Write-Host "ERROR ENCOUNTERED:" -ForegroundColor Red
+    Write-Host $_ -ForegroundColor Red
+    Write-Host "========================================"
 }
 finally {
     if ($icsAttachment) { [Runtime.InteropServices.Marshal]::ReleaseComObject($icsAttachment) | Out-Null }
@@ -438,4 +438,19 @@ finally {
     Write-Host "========================================"
     Write-Host "FINISHED. Created: $createdCount | Skipped: $skippedCount"
     Write-Host "========================================"
+
+    # 5-SECOND TIMEOUT EXIT WITH KEYPRESS DETECTION
+    Write-Host "Closing in 5 seconds... Press any key to stay open."
+    
+    $sw = [Diagnostics.Stopwatch]::StartNew()
+    while ($sw.ElapsedMilliseconds -lt 5000) {
+        if ([Console]::KeyAvailable) {
+            $null = [Console]::ReadKey($true)
+            Write-Host "Pause requested. Press any key to exit."
+            $null = [Console]::ReadKey($true)
+            break
+        }
+        Start-Sleep -Milliseconds 100
+    }
+    $sw.Stop()
 }
