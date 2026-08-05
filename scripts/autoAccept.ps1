@@ -69,14 +69,11 @@ function Start-Outlook-Minimized {
     Write-Host ""
     Write-Host "Starting Outlook minimized..."
 
-    # Ensure we use the correct registry path or standard startup with WindowStyle Minimized
-    $outlookPath = (Get-Command "outlook.exe" -ErrorAction SilentlyContinue).Source
-    if (-not $outlookPath) {
-        # Fallback common path
-        $outlookPath = "$env:ProgramFiles\Microsoft Office\root\Office16\OUTLOOK.EXE"
-    }
-
-    Start-Process -FilePath "outlook.exe" -WindowStyle Minimized -ErrorAction SilentlyContinue
+    $processInfo = New-Object System.Diagnostics.ProcessStartInfo
+    $processInfo.FileName = "outlook.exe"
+    $processInfo.WindowStyle = [System.Diagnostics.ProcessWindowStyle]::Minimized
+    
+    [System.Diagnostics.Process]::Start($processInfo) | Out-Null
     
     $script:StartedOutlookByScript = $true
     Start-Sleep -Seconds 6
@@ -614,7 +611,7 @@ finally {
     if ($icsAttachment) { [Runtime.InteropServices.Marshal]::ReleaseComObject($icsAttachment) | Out-Null }
     if ($targetMail) { [Runtime.InteropServices.Marshal]::ReleaseComObject($targetMail) | Out-Null }
     if ($calendar) { [Runtime.InteropServices.Marshal]::ReleaseComObject($calendar) | Out-Null }
-    if ($inbox) { [Runtime.InteropServices.Marshal]::ReleaseComObject($namespace) | Out-Null } # safe release check
+    if ($inbox) { [Runtime.InteropServices.Marshal]::ReleaseComObject($inbox) | Out-Null }
     if ($namespace) { [Runtime.InteropServices.Marshal]::ReleaseComObject($namespace) | Out-Null }
     if ($outlook) { [Runtime.InteropServices.Marshal]::ReleaseComObject($outlook) | Out-Null }
 
