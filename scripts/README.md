@@ -28,6 +28,12 @@ Push work logs to calendar as ics invites using Azure resources to send the emai
 * Run setuptimeTask.ps1 with the script path as pointing to autoAccept.ps1
 * That sets up scheduled task
 
+## Manually starting the scheduled task
+
+```powershell
+Start-ScheduledTask -TaskName "Worklog Outlook ICS Import" 
+```
+
 ## Deleting Scheduled Task
 
 * For rolling back (if the scheduled task was created with default value)
