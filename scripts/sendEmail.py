@@ -218,20 +218,34 @@ def is_out_of_office(entry):
 
         + entry.get("content", "")
 
-    ).lower()
+    )
 
 
-    keywords = [
+    patterns = [
 
-        "day off",
+        r"\bday[\s-]?off\b",
 
-        "holiday",
+        r"\btaking\s+leave\b",
 
-        "annual leave",
+        r"\bpaid\s+leave\b",
 
-        "vacation",
+        r"\bannual\s+leave\b",
 
-        "pto"
+        r"\bpersonal\s+leave\b",
+
+        r"\bsick\s+leave\b",
+
+        r"\bon\s+leave\b",
+
+        r"\bleave\b",
+
+        r"\btime\s+off\b",
+
+        r"\bvacation\b",
+
+        r"\bpto\b",
+
+        r"\bholiday\b"
 
     ]
 
@@ -242,9 +256,9 @@ def is_out_of_office(entry):
 
         or any(
 
-            keyword in text
+            re.search(pattern, text, re.IGNORECASE)
 
-            for keyword in keywords
+            for pattern in patterns
 
         )
 
@@ -540,7 +554,7 @@ def create_outlook_ics(entries):
 #
 # Output:
 #
-#     docs/time.ics
+#    docs/time.ics
 #
 #
 # Contains:
