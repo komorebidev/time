@@ -165,8 +165,6 @@ $namespace = $null
 $inbox = $null
 $calendar = $null
 $targetMail = $null
-$targetEntryID = $null
-$targetStoreID = $null
 $icsAttachment = $null
 $createdCount = 0
 $skippedCount = 0
@@ -223,9 +221,6 @@ try {
     else {
         Write-Host "Found matching email: $($targetMail.Subject)"
         
-        $targetEntryID = $targetMail.EntryID
-        try { $targetStoreID = $targetMail.StoreID } catch { $targetStoreID = $null }
-
         foreach ($att in $targetMail.Attachments) {
             if ($att.FileName -ieq $AttachmentName) {
                 $icsAttachment = $att
@@ -245,8 +240,6 @@ try {
 
         [Runtime.InteropServices.Marshal]::ReleaseComObject($icsAttachment) | Out-Null
         $icsAttachment = $null
-        [Runtime.InteropServices.Marshal]::ReleaseComObject($targetMail) | Out-Null
-        $targetMail = $null
 
         if (Test-Path $TempICS) { Remove-Item $TempICS -Force -ErrorAction SilentlyContinue }
 
@@ -293,23 +286,14 @@ try {
             }
         }
 
-        # MOVE TO DELETED ITEMS VIA COM METHOD
+        # MOVE TO DELETED ITEMS DIRECTLY USING RETAINED REFERENCE
         Write-Host ""
         Write-Host "Moving processed email to Deleted Items..."
         try {
-            $mailToMove = if ($null -ne $targetStoreID) { 
-                $namespace.GetItemFromID($targetEntryID, $targetStoreID) 
-            } else { 
-                $namespace.GetItemFromID($targetEntryID) 
-            }
-
-            if ($null -ne $mailToMove) {
-                $destFolder = $namespace.GetDefaultFolder(3)
-                $mailToMove.Move($destFolder)
-                [Runtime.InteropServices.Marshal]::ReleaseComObject($destFolder) | Out-Null
-                [Runtime.InteropServices.Marshal]::ReleaseComObject($mailToMove) | Out-Null
-                Write-Host "✓ Email successfully moved."
-            }
+            $destFolder = $namespace.GetDefaultFolder(3)
+            $targetMail.Move($destFolder)
+            [Runtime.InteropServices.Marshal]::ReleaseComObject($destFolder) | Out-Null
+            Write-Host "✓ Email successfully moved."
         }
         catch {
             Write-Host "Warning: Direct move encountered issue: $_"
