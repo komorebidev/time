@@ -266,7 +266,7 @@ $principal = New-ScheduledTaskPrincipal `
     -RunLevel Limited
 
 $settings = New-ScheduledTaskSettingsSet `
-    -MultipleInstancesPolicy IgnoreNew `
+    -MultipleInstances IgnoreNew `
     -AllowStartOnDemand `
     -StartWhenAvailable `
     -ExecutionTimeLimit (New-TimeSpan -Hours 1 -Minutes 12)
