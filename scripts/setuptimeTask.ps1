@@ -1,18 +1,27 @@
 # ============================================================
 # Interactive Scheduled Task Setup
 #
-# Creates a Windows Scheduled Task that runs a PowerShell
-# script whenever the workstation is unlocked.
+# Creates a Windows Scheduled Task for a PowerShell script.
+#
+# Trigger:
+#   Workstation unlock
 #
 # Features:
 #   - Interactive script-path prompt
 #   - Interactive task-name prompt
+#   - Runs when workstation is unlocked
+#   - Runs only when current user is logged in
 #   - Runs PowerShell hidden
-#   - Runs only when the current user is logged in
 #   - Prevents overlapping executions
-#   - Starts when the workstation is unlocked
+#   - Starts when available
 #   - Restarts after failures
 #   - Can immediately test the task
+#
+# Workstation unlock event:
+#   Security Event ID 4801
+#
+# IMPORTANT:
+#   Run this script from PowerShell as Administrator.
 # ============================================================
 
 $ErrorActionPreference = "Stop"
@@ -40,6 +49,7 @@ Write-Host "  - Run when the workstation is unlocked"
 Write-Host "  - Run only when you are logged in"
 Write-Host "  - Run with no visible PowerShell window"
 Write-Host "  - Prevent overlapping instances"
+Write-Host "  - Start when available"
 Write-Host "  - Restart after failures"
 Write-Host ""
 
@@ -55,7 +65,7 @@ while ($true) {
     $scriptPath = Read-Host `
         "Enter the full path to the PowerShell script to schedule"
 
-    # Remove surrounding quotes if the user pasted:
+    # Remove surrounding quotes if pasted:
     # "C:\Worklog\Import-WorklogICS.ps1"
 
     $scriptPath = $scriptPath.Trim().Trim('"')
@@ -112,6 +122,13 @@ if ([string]::IsNullOrWhiteSpace($taskName)) {
 
 
 # ============================================================
+# CURRENT USER
+# ============================================================
+
+$currentUser = "$env:USERDOMAIN\$env:USERNAME"
+
+
+# ============================================================
 # SHOW CONFIGURATION
 # ============================================================
 
@@ -132,12 +149,17 @@ Write-Host "  $scriptPath"
 Write-Host ""
 
 Write-Host "Trigger:"
-Write-Host "  When the workstation is unlocked"
+Write-Host "  Workstation unlock"
+
+Write-Host ""
+
+Write-Host "Event:"
+Write-Host "  Security Event ID 4801"
 
 Write-Host ""
 
 Write-Host "Windows user:"
-Write-Host "  $env:USERDOMAIN\$env:USERNAME"
+Write-Host "  $currentUser"
 
 Write-Host ""
 
@@ -148,6 +170,17 @@ Write-Host ""
 
 Write-Host "PowerShell window:"
 Write-Host "  Hidden"
+
+Write-Host ""
+
+Write-Host "Multiple instances:"
+Write-Host "  Ignore new instance"
+
+Write-Host ""
+
+Write-Host "Failure handling:"
+Write-Host "  Restart up to 3 times"
+Write-Host "  5 minutes between attempts"
 
 Write-Host ""
 
@@ -190,9 +223,7 @@ if ($existingTask) {
         "Replace the existing task? [y/N]"
 
 
-    if (
-        $replace -match "^(Y|y|Yes|yes)$"
-    ) {
+    if ($replace -match "^(Y|y|Yes|yes)$") {
 
         Write-Host ""
         Write-Host "Removing existing task..."
@@ -216,8 +247,8 @@ if ($existingTask) {
 # ============================================================
 # FIND WINDOWS POWERSHELL
 #
-# We intentionally use Windows PowerShell 5.1 because the
-# target script uses Outlook COM.
+# We intentionally use Windows PowerShell 5.1 because
+# the target script uses Outlook COM automation.
 # ============================================================
 
 $powerShellPath = Join-Path `
@@ -232,16 +263,7 @@ if (-not (Test-Path -LiteralPath $powerShellPath)) {
 
 
 # ============================================================
-# CREATE ACTION
-#
-# -NoProfile
-#       Avoids loading the user's PowerShell profile.
-#
-# -WindowStyle Hidden
-#       Prevents a PowerShell console window appearing.
-#
-# -ExecutionPolicy Bypass
-#       Allows the selected script to execute.
+# BUILD POWERSHELL COMMAND
 # ============================================================
 
 $arguments = @(
@@ -252,163 +274,178 @@ $arguments = @(
 ) -join " "
 
 
-$action = New-ScheduledTaskAction `
-    -Execute $powerShellPath `
-    -Argument $arguments
+# ============================================================
+# CREATE TASK SCHEDULER COM OBJECT
+# ============================================================
+
+Write-Host ""
+Write-Host "Connecting to Task Scheduler..."
+
+$scheduler = New-Object -ComObject "Schedule.Service"
+
+$scheduler.Connect()
 
 
 # ============================================================
-# CREATE PRINCIPAL
+# GET ROOT TASK FOLDER
+# ============================================================
+
+$rootFolder = $scheduler.GetFolder("\")
+
+
+# ============================================================
+# CREATE TASK DEFINITION
+# ============================================================
+
+$taskDefinition = $scheduler.NewTask(0)
+
+
+# ============================================================
+# REGISTRATION INFORMATION
+# ============================================================
+
+$taskDefinition.RegistrationInfo.Description = `
+    "Automatically runs the Worklog Outlook ICS importer whenever the workstation is unlocked."
+
+
+# ============================================================
+# PRINCIPAL
 #
-# InteractiveToken means:
-#
-#   Run only when the current user is logged in.
+# InteractiveToken means the task runs using the currently
+# logged-in user's interactive session.
 #
 # This is important for Outlook COM automation.
 # ============================================================
 
-$currentUser = `
-    "$env:USERDOMAIN\$env:USERNAME"
+$taskDefinition.Principal.UserId = $currentUser
 
+$taskDefinition.Principal.LogonType = 3
+# TASK_LOGON_INTERACTIVE_TOKEN
 
-$principal = New-ScheduledTaskPrincipal `
-    -UserId $currentUser `
-    -LogonType Interactive `
-    -RunLevel Limited
-
-
-# ============================================================
-# CREATE SETTINGS
-#
-# AllowStartIfOnBatteries
-#   Allows the task to run on battery.
-#
-# DontStopIfGoingOnBatteries
-#   Doesn't stop an active run when switching to battery.
-#
-# StartWhenAvailable
-#   Allows Windows to start the task when available.
-#
-# MultipleInstances IgnoreNew
-#   Prevents overlapping executions.
-#
-# RestartCount / RestartInterval
-#   Retries failed task executions.
-# ============================================================
-
-$settings = New-ScheduledTaskSettingsSet `
-    -AllowStartIfOnBatteries `
-    -DontStopIfGoingOnBatteries `
-    -StartWhenAvailable `
-    -MultipleInstances IgnoreNew `
-    -RestartCount 3 `
-    -RestartInterval (
-        New-TimeSpan -Minutes 5
-    )
+$taskDefinition.Principal.RunLevel = 0
+# TASK_RUNLEVEL_LUA / Least Privilege
 
 
 # ============================================================
-# CREATE TASK XML
+# SETTINGS
 #
-# Event trigger:
+# MultipleInstancesPolicy:
+#   0 = Parallel
+#   1 = Queue
+#   2 = IgnoreNew
 #
-#   Security log
-#   Event ID 4801
+# We use 2 so a second unlock event doesn't start another
+# copy while the previous execution is still running.
+# ============================================================
+
+$taskDefinition.Settings.MultipleInstances = 2
+
+
+# ============================================================
+# BATTERY SETTINGS
+# ============================================================
+
+$taskDefinition.Settings.DisallowStartIfOnBatteries = $false
+
+$taskDefinition.Settings.StopIfGoingOnBatteries = $false
+
+
+# ============================================================
+# START WHEN AVAILABLE
+# ============================================================
+
+$taskDefinition.Settings.StartWhenAvailable = $true
+
+
+# ============================================================
+# EXECUTION TIME LIMIT
 #
-# Event 4801 means:
+# PT0S means no execution time limit.
+# ============================================================
+
+$taskDefinition.Settings.ExecutionTimeLimit = "PT0S"
+
+
+# ============================================================
+# RESTART AFTER FAILURE
+#
+# Restart up to 3 times.
+# Wait 5 minutes between attempts.
+# ============================================================
+
+$taskDefinition.Settings.RestartCount = 3
+
+$taskDefinition.Settings.RestartInterval = "PT5M"
+
+
+# ============================================================
+# CREATE EVENT TRIGGER
+#
+# Windows Security Event 4801:
+#
 #   "The workstation was unlocked."
 #
-# The XML is used because the ScheduledTasks PowerShell
-# cmdlets do not expose a simple workstation-unlock trigger.
+# The trigger watches the Security event log.
 # ============================================================
 
-$taskXml = @"
-<?xml version="1.0" encoding="UTF-16"?>
-<Task version="1.4"
-      xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task">
+$trigger = $taskDefinition.Triggers.Create(0)
 
-  <RegistrationInfo>
-    <Description>
-      Automatically runs the Worklog Outlook ICS importer
-      whenever the workstation is unlocked.
-    </Description>
-  </RegistrationInfo>
+# 0 = TASK_TRIGGER_EVENT
 
-  <Triggers>
 
-    <EventTrigger>
+$trigger.Enabled = $true
 
-      <Enabled>true</Enabled>
 
-      <Subscription>
-        <![CDATA[
-        <QueryList>
-          <Query Id="0" Path="Security">
-            <Select Path="Security">
-              *[System[
-                Provider[@Name='Microsoft-Windows-Security-Auditing']
-                and (EventID=4801)
-              ]]
-            </Select>
-          </Query>
-        </QueryList>
-        ]]>
-      </Subscription>
+# ============================================================
+# EVENT SUBSCRIPTION
+#
+# This XML selects:
+#
+#   Log: Security
+#   Provider: Microsoft-Windows-Security-Auditing
+#   Event ID: 4801
+# ============================================================
 
-    </EventTrigger>
-
-  </Triggers>
-
-  <Principals>
-
-    <Principal id="Author">
-
-      <UserId>$currentUser</UserId>
-
-      <LogonType>InteractiveToken</LogonType>
-
-      <RunLevel>LeastPrivilege</RunLevel>
-
-    </Principal>
-
-  </Principals>
-
-  <Settings>
-
-    <MultipleInstancesPolicy>IgnoreNew</MultipleInstancesPolicy>
-
-    <DisallowStartIfOnBatteries>false</DisallowStartIfOnBatteries>
-
-    <StopIfGoingOnBatteries>false</StopIfGoingOnBatteries>
-
-    <StartWhenAvailable>true</StartWhenAvailable>
-
-    <ExecutionTimeLimit>PT0S</ExecutionTimeLimit>
-
-    <RestartOnFailure>
-
-      <Interval>PT5M</Interval>
-
-      <Count>3</Count>
-
-    </RestartOnFailure>
-
-  </Settings>
-
-  <Actions Context="Author">
-
-    <Exec>
-
-      <Command>$powerShellPath</Command>
-
-      <Arguments>$arguments</Arguments>
-
-    </Exec>
-
-  </Actions>
-
-</Task>
+$trigger.Subscription = @"
+<QueryList>
+  <Query Id="0" Path="Security">
+    <Select Path="Security">
+      *[
+        System[
+          Provider[
+            @Name='Microsoft-Windows-Security-Auditing'
+          ]
+          and
+          (EventID=4801)
+        ]
+      ]
+    </Select>
+  </Query>
+</QueryList>
 "@
+
+
+# ============================================================
+# CREATE ACTION
+#
+# Execute:
+#   Windows PowerShell 5.1
+#
+# Arguments:
+#   -NoProfile
+#   -WindowStyle Hidden
+#   -ExecutionPolicy Bypass
+#   -File "script.ps1"
+# ============================================================
+
+$action = $taskDefinition.Actions.Create(0)
+
+# 0 = TASK_ACTION_EXEC
+
+
+$action.Path = $powerShellPath
+
+$action.Arguments = $arguments
 
 
 # ============================================================
@@ -416,12 +453,47 @@ $taskXml = @"
 # ============================================================
 
 Write-Host ""
-Write-Host "Creating scheduled task..."
+Write-Host "Registering scheduled task..."
 
-$taskXml |
-    Register-ScheduledTask `
-        -TaskName $taskName `
-        -Force
+# TASK_CREATE_OR_UPDATE = 6
+#
+# TASK_LOGON_INTERACTIVE_TOKEN = 3
+
+$TASK_CREATE_OR_UPDATE = 6
+
+$TASK_LOGON_INTERACTIVE_TOKEN = 3
+
+
+try {
+
+    $rootFolder.RegisterTaskDefinition(
+        $taskName,
+        $taskDefinition,
+        $TASK_CREATE_OR_UPDATE,
+        $currentUser,
+        $null,
+        $TASK_LOGON_INTERACTIVE_TOKEN,
+        $null
+    )
+
+}
+catch {
+
+    Write-Host ""
+    Write-Host "=============================================="
+    Write-Host " ERROR"
+    Write-Host "=============================================="
+    Write-Host ""
+
+    Write-Host "Task registration failed."
+    Write-Host ""
+
+    Write-Host $_.Exception.Message
+
+    Write-Host ""
+
+    throw
+}
 
 
 # ============================================================
@@ -445,7 +517,12 @@ Write-Host "  $scriptPath"
 Write-Host ""
 
 Write-Host "Trigger:"
-Write-Host "  When the workstation is unlocked"
+Write-Host "  Workstation unlock"
+
+Write-Host ""
+
+Write-Host "Event:"
+Write-Host "  Security Event ID 4801"
 
 Write-Host ""
 
@@ -456,6 +533,17 @@ Write-Host ""
 
 Write-Host "Run mode:"
 Write-Host "  Only while you are logged in"
+
+Write-Host ""
+
+Write-Host "Multiple instances:"
+Write-Host "  Ignore new instance"
+
+Write-Host ""
+
+Write-Host "Failure handling:"
+Write-Host "  Restart up to 3 times"
+Write-Host "  5 minutes between attempts"
 
 Write-Host ""
 
@@ -487,9 +575,23 @@ if (
         -TaskName $taskName
 
 
+    $taskInfo = Get-ScheduledTaskInfo `
+        -TaskName $taskName
+
+
     Write-Host ""
     Write-Host "Task state:"
     Write-Host "  $($task.State)"
+
+    Write-Host ""
+
+    Write-Host "Last run time:"
+    Write-Host "  $($taskInfo.LastRunTime)"
+
+    Write-Host ""
+
+    Write-Host "Last run result:"
+    Write-Host "  $($taskInfo.LastTaskResult)"
 
     Write-Host ""
 
@@ -500,8 +602,8 @@ if (
     Write-Host "no PowerShell window should appear."
 
     Write-Host ""
-    Write-Host "You can check Task Scheduler to verify"
-    Write-Host "the Last Run Result if necessary."
+    Write-Host "You can also lock and unlock Windows"
+    Write-Host "to test the Event ID 4801 trigger."
 }
 
 
@@ -511,3 +613,7 @@ if (
 
 Write-Host ""
 Write-Host "Setup complete."
+Write-Host ""
+
+Write-Host "The script will now run whenever"
+Write-Host "the workstation is unlocked."
