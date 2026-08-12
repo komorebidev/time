@@ -1,15 +1,16 @@
 # ============================================================
-# Interactive Scheduled Task Setup (Workstation Unlock Trigger)
+# Interactive Scheduled Task Setup
 #
-# Creates a Windows Scheduled Task for a PowerShell script.
+# Creates a Windows Scheduled Task that runs a PowerShell
+# script whenever the workstation is unlocked.
 #
 # Features:
 #   - Interactive script-path prompt
 #   - Interactive task-name prompt
-#   - Triggers when the workstation is unlocked
 #   - Runs PowerShell hidden
 #   - Runs only when the current user is logged in
 #   - Prevents overlapping executions
+#   - Starts when the workstation is unlocked
 #   - Restarts after failures
 #   - Can immediately test the task
 # ============================================================
@@ -25,20 +26,21 @@ Clear-Host
 
 Write-Host ""
 Write-Host "=============================================="
-Write-Host " PowerShell Scheduled Task Setup (Unlock)"
+Write-Host " PowerShell Scheduled Task Setup"
 Write-Host "=============================================="
 Write-Host ""
 
 Write-Host "This will create a scheduled task that runs"
-Write-Host "your PowerShell script automatically every time"
-Write-Host "you unlock your workstation."
+Write-Host "a PowerShell script whenever the workstation"
+Write-Host "is unlocked."
 Write-Host ""
 
 Write-Host "The task will:"
-Write-Host "  - Run immediately upon unlocking the PC"
+Write-Host "  - Run when the workstation is unlocked"
 Write-Host "  - Run only when you are logged in"
 Write-Host "  - Run with no visible PowerShell window"
 Write-Host "  - Prevent overlapping instances"
+Write-Host "  - Restart after failures"
 Write-Host ""
 
 
@@ -130,7 +132,7 @@ Write-Host "  $scriptPath"
 Write-Host ""
 
 Write-Host "Trigger:"
-Write-Host "  On Workstation Unlock"
+Write-Host "  When the workstation is unlocked"
 
 Write-Host ""
 
@@ -140,7 +142,7 @@ Write-Host "  $env:USERDOMAIN\$env:USERNAME"
 Write-Host ""
 
 Write-Host "Run mode:"
-Write-Host "  Only when user is logged in (Interactive)"
+Write-Host "  Only when user is logged in"
 
 Write-Host ""
 
@@ -214,8 +216,8 @@ if ($existingTask) {
 # ============================================================
 # FIND WINDOWS POWERSHELL
 #
-# We intentionally use Windows PowerShell 5.1 rather than
-# PowerShell 7 because the target script uses Outlook COM.
+# We intentionally use Windows PowerShell 5.1 because the
+# target script uses Outlook COM.
 # ============================================================
 
 $powerShellPath = Join-Path `
@@ -231,6 +233,15 @@ if (-not (Test-Path -LiteralPath $powerShellPath)) {
 
 # ============================================================
 # CREATE ACTION
+#
+# -NoProfile
+#       Avoids loading the user's PowerShell profile.
+#
+# -WindowStyle Hidden
+#       Prevents a PowerShell console window appearing.
+#
+# -ExecutionPolicy Bypass
+#       Allows the selected script to execute.
 # ============================================================
 
 $arguments = @(
@@ -247,31 +258,197 @@ $action = New-ScheduledTaskAction `
 
 
 # ============================================================
-# CREATE TRIGGER (WORKSTATION UNLOCK)
+# CREATE PRINCIPAL
+#
+# InteractiveToken means:
+#
+#   Run only when the current user is logged in.
+#
+# This is important for Outlook COM automation.
 # ============================================================
 
-# Properly bind the CIM class so Register-ScheduledTask accepts the trigger type
-$stateChangeTriggerClass = Get-CimClass -Namespace "Root\Microsoft\Windows\TaskScheduler" -ClassName "MSFT_TaskSessionStateChangeTrigger"
-$trigger = New-CimInstance -CimClass $stateChangeTriggerClass -Property @{
-    StateChange = 8 # 8 = ConsoleUnlock / ConsoleConnect
-} -ClientOnly
+$currentUser = `
+    "$env:USERDOMAIN\$env:USERNAME"
+
+<<<<<<< HEAD
+
+$principal = New-ScheduledTaskPrincipal `
+    -UserId $currentUser `
+    -LogonType Interactive `
+    -RunLevel Limited
 
 
+# ============================================================
+# CREATE SETTINGS
+#
+# AllowStartIfOnBatteries
+#   Allows the task to run on battery.
+#
+# DontStopIfGoingOnBatteries
+#   Doesn't stop an active run when switching to battery.
+#
+# StartWhenAvailable
+#   Allows Windows to start the task when available.
+#
+# MultipleInstances IgnoreNew
+#   Prevents overlapping executions.
+#
+# RestartCount / RestartInterval
+#   Retries failed task executions.
+# ============================================================
+
+$settings = New-ScheduledTaskSettingsSet `
+    -AllowStartIfOnBatteries `
+    -DontStopIfGoingOnBatteries `
+    -StartWhenAvailable `
+    -MultipleInstances IgnoreNew `
+    -RestartCount 3 `
+    -RestartInterval (
+        New-TimeSpan -Minutes 5
+    )
+
+
+# ============================================================
+# CREATE TASK XML
+#
+# Event trigger:
+#
+#   Security log
+#   Event ID 4801
+#
+# Event 4801 means:
+#   "The workstation was unlocked."
+#
+# The XML is used because the ScheduledTasks PowerShell
+# cmdlets do not expose a simple workstation-unlock trigger.
+# ============================================================
+
+$taskXml = @"
+<?xml version="1.0" encoding="UTF-16"?>
+<Task version="1.4"
+      xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task">
+
+  <RegistrationInfo>
+    <Description>
+      Automatically runs the Worklog Outlook ICS importer
+      whenever the workstation is unlocked.
+    </Description>
+  </RegistrationInfo>
+
+  <Triggers>
+
+    <EventTrigger>
+
+      <Enabled>true</Enabled>
+
+      <Subscription>
+        <![CDATA[
+        <QueryList>
+          <Query Id="0" Path="Security">
+            <Select Path="Security">
+              *[System[
+                Provider[@Name='Microsoft-Windows-Security-Auditing']
+                and (EventID=4801)
+              ]]
+            </Select>
+          </Query>
+        </QueryList>
+        ]]>
+      </Subscription>
+
+    </EventTrigger>
+
+  </Triggers>
+
+  <Principals>
+
+    <Principal id="Author">
+
+      <UserId>$currentUser</UserId>
+
+      <LogonType>InteractiveToken</LogonType>
+
+      <RunLevel>LeastPrivilege</RunLevel>
+
+    </Principal>
+
+  </Principals>
+
+  <Settings>
+
+    <MultipleInstancesPolicy>IgnoreNew</MultipleInstancesPolicy>
+
+    <DisallowStartIfOnBatteries>false</DisallowStartIfOnBatteries>
+
+    <StopIfGoingOnBatteries>false</StopIfGoingOnBatteries>
+
+    <StartWhenAvailable>true</StartWhenAvailable>
+
+    <ExecutionTimeLimit>PT0S</ExecutionTimeLimit>
+
+    <RestartOnFailure>
+
+      <Interval>PT5M</Interval>
+
+      <Count>3</Count>
+
+    </RestartOnFailure>
+
+  </Settings>
+
+  <Actions Context="Author">
+
+    <Exec>
+
+      <Command>$powerShellPath</Command>
+
+      <Arguments>$arguments</Arguments>
+
+    </Exec>
+
+  </Actions>
+
+</Task>
+"@
+=======
+>>>>>>> 28874691d5ec166e708290538900afd7c028a49e
+
+<<<<<<< HEAD
+=======
 # ============================================================
 # CREATE PRINCIPAL & SETTINGS
 # ============================================================
+>>>>>>> 28874691d5ec166e708290538900afd7c028a49e
 
+<<<<<<< HEAD
+# ============================================================
+# REGISTER TASK
+# ============================================================
+=======
 $principal = New-ScheduledTaskPrincipal `
     -UserId "$env:USERDOMAIN\$env:USERNAME" `
     -LogonType Interactive `
     -RunLevel Limited
+>>>>>>> 28874691d5ec166e708290538900afd7c028a49e
 
+<<<<<<< HEAD
+Write-Host ""
+Write-Host "Creating scheduled task..."
+
+$taskXml |
+    Register-ScheduledTask `
+        -TaskName $taskName `
+        -Force
+
+
+=======
 $settings = New-ScheduledTaskSettingsSet `
     -MultipleInstances IgnoreNew `
     -StartWhenAvailable `
     -ExecutionTimeLimit (New-TimeSpan -Hours 1 -Minutes 12)
 
 
+>>>>>>> 28874691d5ec166e708290538900afd7c028a49e
 # ============================================================
 # REGISTER SCHEDULED TASK
 # ============================================================
@@ -306,12 +483,17 @@ Write-Host "  $scriptPath"
 Write-Host ""
 
 Write-Host "Trigger:"
-Write-Host "  On Workstation Unlock"
+Write-Host "  When the workstation is unlocked"
 
 Write-Host ""
 
 Write-Host "PowerShell window:"
 Write-Host "  Hidden"
+
+Write-Host ""
+
+Write-Host "Run mode:"
+Write-Host "  Only while you are logged in"
 
 Write-Host ""
 
@@ -350,6 +532,14 @@ if (
     Write-Host ""
 
     Write-Host "Task started successfully."
+
+    Write-Host ""
+    Write-Host "Because PowerShell is configured as hidden,"
+    Write-Host "no PowerShell window should appear."
+
+    Write-Host ""
+    Write-Host "You can check Task Scheduler to verify"
+    Write-Host "the Last Run Result if necessary."
 }
 
 
@@ -359,4 +549,3 @@ if (
 
 Write-Host ""
 Write-Host "Setup complete."
-Write-Host ""
