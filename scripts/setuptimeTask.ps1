@@ -1,3 +1,4 @@
+# Current version has behavior to run immediately if missed while locked
 # ============================================================
 # Interactive Scheduled Task Setup
 #
