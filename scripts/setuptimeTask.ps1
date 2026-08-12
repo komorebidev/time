@@ -105,7 +105,7 @@ $taskName = Read-Host `
 
 if ([string]::IsNullOrWhiteSpace($taskName)) {
 
-    $taskName = $defaultTaskName
+    $taskName =$defaultTaskName
 }
 
 
@@ -189,7 +189,7 @@ if ($existingTask) {
 
 
     if (
-        $replace -match "^(Y|y|Yes|yes)$"
+        $replace -match "^(Y\vert{}y\vert{}Yes\vert{}yes)$"
     ) {
 
         Write-Host ""
@@ -250,59 +250,39 @@ $action = New-ScheduledTaskAction `
 # CREATE TRIGGER (WORKSTATION UNLOCK)
 # ============================================================
 
-# Creates a trigger that fires when the current user unlocks the workstation
-$trigger = New-ScheduledTaskTrigger -AtLogOn:$false
-# Using CIM/XML or wrapper to create a workstation unlock trigger cleanly:
+# Use CIM to cleanly create a Session State Change trigger for Console Connect / Unlock (StateChange = 8)
 $trigger = New-CimInstance -Namespace Root\Microsoft\Windows\TaskScheduler -ClassName MSFT_TaskSessionStateChangeTrigger -Property @{
-    StateChange = 8 # 8 corresponds to TASK_SESSION_STATE_CHANGE_TYPE.ConsoleConnect (or unlock)
+    StateChange = 8 
 } -ClientOnly
 
-# Alternative fallback for universal PowerShell compatibility if CimInstance syntax varies:
-$triggerXml = @"
-<Task version="1.2" xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task">
-  <Triggers>
-    <SessionStateChangeTrigger>
-      <Enabled>true</Enabled>
-      <StateChange>ConsoleUnlock</StateChange>
-    </SessionStateChangeTrigger>
-  </Triggers>
-  <Principals>
-    <Principal id="Author">
-      <UserId>$env:USERDOMAIN\$env:USERNAME</UserId>
-      <LogonType>InteractiveToken</LogonType>
-      <RunLevel>LeastPrivilege</RunLevel>
-    </Principal>
-  </Principals>
-  <Settings>
-    <MultipleInstancesPolicy>IgnoreNew</MultipleInstancesPolicy>
-    <DisallowStartIfOnBatteries>false</DisallowStartIfOnBatteries>
-    <StopIfGoingOnBatteries>false</StopIfGoingOnBatteries>
-    <AllowHardTerminate>true</AllowHardTerminate>
-    <StartWhenAvailable>true</StartWhenAvailable>
-    <RunOnlyIfNetworkAvailable>false</RunOnlyIfNetworkAvailable>
-    <IdleSettings>
-      <StopOnIdleEnd>false</StopOnIdleEnd>
-      <RestartOnIdle>false</RestartOnIdle>
-    </IdleSettings>
-    <AllowStartOnDemand>true</AllowStartOnDemand>
-    <Enabled>true</Enabled>
-    <Hidden>false</Hidden>
-    <RunOnlyIfIdle>false</RunOnlyIfIdle>
-    <WakeToRun>false</WakeToRun>
-    <ExecutionTimeLimit>PT72M</ExecutionTimeLimit>
-    <Priority>7</Priority>
-  </Settings>
-  <Actions Context="VisualStudio">
-    <Exec>
-      <Command>$powerShellPath</Command>
-      <Arguments>$arguments</Arguments>
-    </Exec>
-  </Actions>
-</Task>
-"@
 
-# Register via ScheduledTask XML for complete precision over SessionState triggers
-Register-ScheduledTask -TaskName $taskName -Xml $triggerXml -Force | Out-Null
+# ============================================================
+# CREATE PRINCIPAL & SETTINGS
+# ============================================================
+
+$principal = New-ScheduledTaskPrincipal `
+    -UserId "$env:USERDOMAIN\$env:USERNAME" `
+    -LogonType Interactive `
+    -RunLevel LeastPrivilege
+
+$settings = New-ScheduledTaskSettingsSet `
+    -MultipleInstancesPolicy IgnoreNew `
+    -AllowStartOnDemand `
+    -StartWhenAvailable `
+    -ExecutionTimeLimit (New-TimeSpan -Hours 1 -Minutes 12)
+
+
+# ============================================================
+# REGISTER SCHEDULED TASK
+# ============================================================
+
+Register-ScheduledTask `
+    -TaskName $taskName `
+    -Action $action `
+    -Trigger $trigger `
+    -Principal $principal `
+    -Settings $settings `
+    -Force | Out-Null
 
 
 # ============================================================
@@ -346,7 +326,7 @@ $runNow = Read-Host `
 
 if (
     [string]::IsNullOrWhiteSpace($runNow) -or
-    $runNow -match "^(Y|y|Yes|yes)$"
+    $runNow -match "^(Y\vert{}y\vert{}Yes\vert{}yes)$"
 ) {
 
     Write-Host ""
