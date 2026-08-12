@@ -56,7 +56,7 @@ while ($true) {
     # Remove surrounding quotes if the user pasted:
     # "C:\Worklog\Import-WorklogICS.ps1"
 
-    $scriptPath = $scriptPath.Trim().Trim('"')
+    $scriptPath =$scriptPath.Trim().Trim('"')
 
 
     if ([string]::IsNullOrWhiteSpace($scriptPath)) {
@@ -160,7 +160,7 @@ $confirmation = Read-Host `
 
 if (
     $confirmation -and
-    $confirmation -notmatch "^(Y|y|Yes|yes)$"
+    $confirmation -notmatch "^(Y\vert{}y\vert{}Yes\vert{}yes)$"
 ) {
 
     Write-Host ""
@@ -250,9 +250,10 @@ $action = New-ScheduledTaskAction `
 # CREATE TRIGGER (WORKSTATION UNLOCK)
 # ============================================================
 
-# Use CIM to cleanly create a Session State Change trigger for Console Connect / Unlock (StateChange = 8)
-$trigger = New-CimInstance -Namespace Root\Microsoft\Windows\TaskScheduler -ClassName MSFT_TaskSessionStateChangeTrigger -Property @{
-    StateChange = 8 
+# Properly bind the CIM class so Register-ScheduledTask accepts the trigger type
+$stateChangeTriggerClass = Get-CimClass -Namespace "Root\Microsoft\Windows\TaskScheduler" -ClassName "MSFT_TaskSessionStateChangeTrigger"
+$trigger = New-CimInstance -CimClass $stateChangeTriggerClass -Property @{
+    StateChange = 8 # 8 = ConsoleUnlock / ConsoleConnect
 } -ClientOnly
 
 
@@ -325,7 +326,7 @@ $runNow = Read-Host `
 
 if (
     [string]::IsNullOrWhiteSpace($runNow) -or
-    $runNow -match "^(Y|y|Yes|yes)$"
+    $runNow -match "^(Y\vert{}y\vert{}Yes\vert{}yes)$"
 ) {
 
     Write-Host ""
