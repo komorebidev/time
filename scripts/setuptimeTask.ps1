@@ -1,17 +1,15 @@
 # ============================================================
-# Interactive Scheduled Task Setup
+# Interactive Scheduled Task Setup (Workstation Unlock Trigger)
 #
 # Creates a Windows Scheduled Task for a PowerShell script.
 #
 # Features:
 #   - Interactive script-path prompt
 #   - Interactive task-name prompt
-#   - Interactive interval prompt
-#   - Defaults to 20 minutes
+#   - Triggers when the workstation is unlocked
 #   - Runs PowerShell hidden
 #   - Runs only when the current user is logged in
 #   - Prevents overlapping executions
-#   - Starts when the PC becomes available
 #   - Restarts after failures
 #   - Can immediately test the task
 # ============================================================
@@ -27,20 +25,20 @@ Clear-Host
 
 Write-Host ""
 Write-Host "=============================================="
-Write-Host " PowerShell Scheduled Task Setup"
+Write-Host " PowerShell Scheduled Task Setup (Unlock)"
 Write-Host "=============================================="
 Write-Host ""
 
 Write-Host "This will create a scheduled task that runs"
-Write-Host "a PowerShell script periodically and silently."
+Write-Host "your PowerShell script automatically every time"
+Write-Host "you unlock your workstation."
 Write-Host ""
 
 Write-Host "The task will:"
+Write-Host "  - Run immediately upon unlocking the PC"
 Write-Host "  - Run only when you are logged in"
 Write-Host "  - Run with no visible PowerShell window"
 Write-Host "  - Prevent overlapping instances"
-Write-Host "  - Start when the PC becomes available"
-Write-Host "  - Restart after failures"
 Write-Host ""
 
 
@@ -112,54 +110,6 @@ if ([string]::IsNullOrWhiteSpace($taskName)) {
 
 
 # ============================================================
-# ASK FOR INTERVAL
-# ============================================================
-
-Write-Host ""
-
-$defaultInterval = 20
-
-while ($true) {
-
-    $intervalInput = Read-Host `
-        "Run every how many minutes? [$defaultInterval]"
-
-
-    # Blank = use default
-
-    if ([string]::IsNullOrWhiteSpace($intervalInput)) {
-
-        $intervalMinutes = $defaultInterval
-
-        break
-    }
-
-
-    # Safely convert the user's input to an integer
-
-    try {
-
-        $intervalMinutes = [int]$intervalInput
-
-    }
-    catch {
-
-        $intervalMinutes = 0
-    }
-
-
-    if ($intervalMinutes -ge 1) {
-
-        break
-    }
-
-
-    Write-Host ""
-    Write-Host "ERROR: Please enter a whole number of at least 1."
-}
-
-
-# ============================================================
 # SHOW CONFIGURATION
 # ============================================================
 
@@ -179,8 +129,8 @@ Write-Host "  $scriptPath"
 
 Write-Host ""
 
-Write-Host "Interval:"
-Write-Host "  Every $intervalMinutes minute(s)"
+Write-Host "Trigger:"
+Write-Host "  On Workstation Unlock"
 
 Write-Host ""
 
@@ -190,7 +140,7 @@ Write-Host "  $env:USERDOMAIN\$env:USERNAME"
 Write-Host ""
 
 Write-Host "Run mode:"
-Write-Host "  Only when user is logged in"
+Write-Host "  Only when user is logged in (Interactive)"
 
 Write-Host ""
 
@@ -281,15 +231,6 @@ if (-not (Test-Path -LiteralPath $powerShellPath)) {
 
 # ============================================================
 # CREATE ACTION
-#
-# -NoProfile
-#       Avoids loading the user's PowerShell profile.
-#
-# -WindowStyle Hidden
-#       Prevents a PowerShell console window appearing.
-#
-# -ExecutionPolicy Bypass
-#       Allows the selected script to execute.
 # ============================================================
 
 $arguments = @(
@@ -306,99 +247,62 @@ $action = New-ScheduledTaskAction `
 
 
 # ============================================================
-# CREATE TRIGGER
-#
-# First run:
-#   Approximately one minute after setup.
-#
-# Then:
-#   Repeat at the selected interval.
-#
-# The 3650-day duration is approximately 10 years,
-# effectively making this a long-running repeating task.
+# CREATE TRIGGER (WORKSTATION UNLOCK)
 # ============================================================
 
-$startTime = (Get-Date).AddMinutes(1)
+# Creates a trigger that fires when the current user unlocks the workstation
+$trigger = New-ScheduledTaskTrigger -AtLogOn:$false
+# Using CIM/XML or wrapper to create a workstation unlock trigger cleanly:
+$trigger = New-CimInstance -Namespace Root\Microsoft\Windows\TaskScheduler -ClassName MSFT_TaskSessionStateChangeTrigger -Property @{
+    StateChange = 8 # 8 corresponds to TASK_SESSION_STATE_CHANGE_TYPE.ConsoleConnect (or unlock)
+} -ClientOnly
 
-$repetitionInterval = `
-    New-TimeSpan -Minutes $intervalMinutes
+# Alternative fallback for universal PowerShell compatibility if CimInstance syntax varies:
+$triggerXml = @"
+<Task version="1.2" xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task">
+  <Triggers>
+    <SessionStateChangeTrigger>
+      <Enabled>true</Enabled>
+      <StateChange>ConsoleUnlock</StateChange>
+    </SessionStateChangeTrigger>
+  </Triggers>
+  <Principals>
+    <Principal id="Author">
+      <UserId>$env:USERDOMAIN\$env:USERNAME</UserId>
+      <LogonType>InteractiveToken</LogonType>
+      <RunLevel>LeastPrivilege</RunLevel>
+    </Principal>
+  </Principals>
+  <Settings>
+    <MultipleInstancesPolicy>IgnoreNew</MultipleInstancesPolicy>
+    <DisallowStartIfOnBatteries>false</DisallowStartIfOnBatteries>
+    <StopIfGoingOnBatteries>false</StopIfGoingOnBatteries>
+    <AllowHardTerminate>true</AllowHardTerminate>
+    <StartWhenAvailable>true</StartWhenAvailable>
+    <RunOnlyIfNetworkAvailable>false</RunOnlyIfNetworkAvailable>
+    <IdleSettings>
+      <StopOnIdleEnd>false</StopOnIdleEnd>
+      <RestartOnIdle>false</RestartOnIdle>
+    </IdleSettings>
+    <AllowStartOnDemand>true</AllowStartOnDemand>
+    <Enabled>true</Enabled>
+    <Hidden>false</Hidden>
+    <RunOnlyIfIdle>false</RunOnlyIfIdle>
+    <WakeToRun>false</WakeToRun>
+    <ExecutionTimeLimit>PT72M</ExecutionTimeLimit>
+    <Priority>7</Priority>
+  </Settings>
+  <Actions Context="VisualStudio">
+    <Exec>
+      <Command>$powerShellPath</Command>
+      <Arguments>$arguments</Arguments>
+    </Exec>
+  </Actions>
+</Task>
+"@
 
-$repetitionDuration = `
-    New-TimeSpan -Days 3650
-
-
-$trigger = New-ScheduledTaskTrigger `
-    -Once `
-    -At $startTime `
-    -RepetitionInterval $repetitionInterval `
-    -RepetitionDuration $repetitionDuration
-
-
-# ============================================================
-# CREATE PRINCIPAL
-#
-# InteractiveToken means:
-#
-#   Run only when the current user is logged in.
-#
-# This is important for Outlook COM automation.
-# ============================================================
-
-$currentUser = `
-    "$env:USERDOMAIN\$env:USERNAME"
-
-
-$principal = New-ScheduledTaskPrincipal `
-    -UserId $currentUser `
-    -LogonType Interactive `
-    -RunLevel Limited
-
-
-# ============================================================
-# CREATE SETTINGS
-#
-# AllowStartIfOnBatteries
-#   Allows the task to run on battery.
-#
-# DontStopIfGoingOnBatteries
-#   Doesn't stop an active run when switching to battery.
-#
-# StartWhenAvailable
-#   Lets Windows run the task when it becomes available.
-#
-# MultipleInstances IgnoreNew
-#   Prevents overlapping executions.
-#
-# RestartCount / RestartInterval
-#   Retries failed task executions.
-# ============================================================
-
-$settings = New-ScheduledTaskSettingsSet `
-    -AllowStartIfOnBatteries `
-    -DontStopIfGoingOnBatteries `
-    -StartWhenAvailable `
-    -MultipleInstances IgnoreNew `
-    -RestartCount 3 `
-    -RestartInterval (
-        New-TimeSpan -Minutes 5
-    )
-
-
-# ============================================================
-# REGISTER TASK
-# ============================================================
-
-Write-Host ""
-Write-Host "Creating scheduled task..."
-
-Register-ScheduledTask `
-    -TaskName $taskName `
-    -Action $action `
-    -Trigger $trigger `
-    -Principal $principal `
-    -Settings $settings `
-    -Description `
-        "Automatically runs the Worklog Outlook ICS importer."
+# Register via ScheduledTask XML for complete precision over SessionState triggers
+Register-ScheduledTask -TaskName $taskName -Xml $triggerXml -Force | Out-Null
 
 
 # ============================================================
@@ -421,23 +325,13 @@ Write-Host "  $scriptPath"
 
 Write-Host ""
 
-Write-Host "Schedule:"
-Write-Host "  Every $intervalMinutes minute(s)"
+Write-Host "Trigger:"
+Write-Host "  On Workstation Unlock"
 
 Write-Host ""
 
 Write-Host "PowerShell window:"
 Write-Host "  Hidden"
-
-Write-Host ""
-
-Write-Host "First scheduled run:"
-Write-Host "  Approximately $startTime"
-
-Write-Host ""
-
-Write-Host "Run mode:"
-Write-Host "  Only while you are logged in"
 
 Write-Host ""
 
@@ -476,14 +370,6 @@ if (
     Write-Host ""
 
     Write-Host "Task started successfully."
-
-    Write-Host ""
-    Write-Host "Because PowerShell is configured as hidden,"
-    Write-Host "no PowerShell window should appear."
-
-    Write-Host ""
-    Write-Host "You can check Task Scheduler to verify"
-    Write-Host "the Last Run Result if necessary."
 }
 
 
