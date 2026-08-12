@@ -58,7 +58,7 @@ while ($true) {
     # Remove surrounding quotes if the user pasted:
     # "C:\Worklog\Import-WorklogICS.ps1"
 
-    $scriptPath =$scriptPath.Trim().Trim('"')
+    $scriptPath = $scriptPath.Trim().Trim('"')
 
 
     if ([string]::IsNullOrWhiteSpace($scriptPath)) {
@@ -162,7 +162,7 @@ $confirmation = Read-Host `
 
 if (
     $confirmation -and
-    $confirmation -notmatch "^(Y\vert{}y\vert{}Yes\vert{}yes)$"
+    $confirmation -notmatch "^(Y|y|Yes|yes)$"
 ) {
 
     Write-Host ""
@@ -270,7 +270,6 @@ $action = New-ScheduledTaskAction `
 $currentUser = `
     "$env:USERDOMAIN\$env:USERNAME"
 
-<<<<<<< HEAD
 
 $principal = New-ScheduledTaskPrincipal `
     -UserId $currentUser `
@@ -410,28 +409,12 @@ $taskXml = @"
 
 </Task>
 "@
-=======
->>>>>>> 28874691d5ec166e708290538900afd7c028a49e
 
-<<<<<<< HEAD
-=======
-# ============================================================
-# CREATE PRINCIPAL & SETTINGS
-# ============================================================
->>>>>>> 28874691d5ec166e708290538900afd7c028a49e
 
-<<<<<<< HEAD
 # ============================================================
 # REGISTER TASK
 # ============================================================
-=======
-$principal = New-ScheduledTaskPrincipal `
-    -UserId "$env:USERDOMAIN\$env:USERNAME" `
-    -LogonType Interactive `
-    -RunLevel Limited
->>>>>>> 28874691d5ec166e708290538900afd7c028a49e
 
-<<<<<<< HEAD
 Write-Host ""
 Write-Host "Creating scheduled task..."
 
@@ -439,27 +422,6 @@ $taskXml |
     Register-ScheduledTask `
         -TaskName $taskName `
         -Force
-
-
-=======
-$settings = New-ScheduledTaskSettingsSet `
-    -MultipleInstances IgnoreNew `
-    -StartWhenAvailable `
-    -ExecutionTimeLimit (New-TimeSpan -Hours 1 -Minutes 12)
-
-
->>>>>>> 28874691d5ec166e708290538900afd7c028a49e
-# ============================================================
-# REGISTER SCHEDULED TASK
-# ============================================================
-
-Register-ScheduledTask `
-    -TaskName $taskName `
-    -Action $action `
-    -Trigger $trigger `
-    -Principal $principal `
-    -Settings $settings `
-    -Force | Out-Null
 
 
 # ============================================================
@@ -508,7 +470,7 @@ $runNow = Read-Host `
 
 if (
     [string]::IsNullOrWhiteSpace($runNow) -or
-    $runNow -match "^(Y\vert{}y\vert{}Yes\vert{}yes)$"
+    $runNow -match "^(Y|y|Yes|yes)$"
 ) {
 
     Write-Host ""
