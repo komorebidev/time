@@ -263,7 +263,7 @@ $trigger = New-CimInstance -Namespace Root\Microsoft\Windows\TaskScheduler -Clas
 $principal = New-ScheduledTaskPrincipal `
     -UserId "$env:USERDOMAIN\$env:USERNAME" `
     -LogonType Interactive `
-    -RunLevel LeastPrivilege
+    -RunLevel Limited
 
 $settings = New-ScheduledTaskSettingsSet `
     -MultipleInstancesPolicy IgnoreNew `
