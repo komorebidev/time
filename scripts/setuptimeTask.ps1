@@ -105,7 +105,7 @@ $taskName = Read-Host `
 
 if ([string]::IsNullOrWhiteSpace($taskName)) {
 
-    $taskName =$defaultTaskName
+    $taskName = $defaultTaskName
 }
 
 
@@ -189,7 +189,7 @@ if ($existingTask) {
 
 
     if (
-        $replace -match "^(Y\vert{}y\vert{}Yes\vert{}yes)$"
+        $replace -match "^(Y|y|Yes|yes)$"
     ) {
 
         Write-Host ""
@@ -267,7 +267,6 @@ $principal = New-ScheduledTaskPrincipal `
 
 $settings = New-ScheduledTaskSettingsSet `
     -MultipleInstances IgnoreNew `
-    -AllowStartOnDemand `
     -StartWhenAvailable `
     -ExecutionTimeLimit (New-TimeSpan -Hours 1 -Minutes 12)
 
@@ -326,7 +325,7 @@ $runNow = Read-Host `
 
 if (
     [string]::IsNullOrWhiteSpace($runNow) -or
-    $runNow -match "^(Y\vert{}y\vert{}Yes\vert{}yes)$"
+    $runNow -match "^(Y|y|Yes|yes)$"
 ) {
 
     Write-Host ""
