@@ -2,6 +2,7 @@ import os
 import sys
 import re
 import base64
+import subprocess
 
 from datetime import datetime, timedelta
 
@@ -11,36 +12,91 @@ from icalendar import Calendar, Event
 
 
 # ======================================================================
-# Find markdown files recursively
+# Find markdown files (Smart Git-aware or Full Scan)
 # ======================================================================
 
-def find_markdown_files(path):
+def find_markdown_files(path, full_refresh=False):
 
     markdown_files = []
 
 
-    if os.path.isfile(path):
+    # If it's a full refresh or not a git repository, scan everything
+    if full_refresh or not os.path.exists(os.path.join(path, ".git")):
 
-        if path.endswith(".md"):
+        print("Performing full scan of markdown files...")
 
-            markdown_files.append(path)
+        if os.path.isfile(path):
 
+            if path.endswith(".md"):
 
+                markdown_files.append(path)
 
-    elif os.path.isdir(path):
+        elif os.path.isdir(path):
 
-        for root, dirs, files in os.walk(path):
+            for root, dirs, files in os.walk(path):
 
-            for file in files:
+                for file in files:
 
-                if file.endswith(".md"):
+                    if file.endswith(".md"):
 
-                    markdown_files.append(
-                        os.path.join(
-                            root,
-                            file
+                        markdown_files.append(
+                            os.path.join(
+                                root,
+                                file
+                            )
                         )
-                    )
+
+        return markdown_files
+
+
+
+    # Incremental mode: Ask Git what files changed in the latest commit
+    try:
+
+        print("Detecting changed markdown files via Git...")
+
+        result = subprocess.run(
+            ["git", "diff", "--name-only", "HEAD~1", "HEAD"],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            check=True
+        )
+
+        changed_files = result.stdout.splitlines()
+
+
+        result_untracked = subprocess.run(
+            ["git", "ls-files", "--others", "--exclude-standard"],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            check=True
+        )
+
+        untracked_files = result_untracked.stdout.splitlines()
+
+
+        all_changed = set(changed_files + untracked_files)
+
+
+        for file in all_changed:
+
+            if file.endswith(".md") and os.path.exists(file):
+
+                markdown_files.append(file)
+
+
+        if not markdown_files:
+
+            print("Git reports no markdown files changed in this commit.")
+
+
+    except Exception as e:
+
+        print(f"Git diff failed ({e}), falling back to full scan...")
+
+        return find_markdown_files(path, full_refresh=True)
 
 
     return markdown_files
@@ -762,22 +818,7 @@ def send_email(ics_content, file_name):
 # Run:
 #
 # python scripts/sendEmail.py .
-#
-#
-# Scans all markdown files:
-#
-# 2026/
-# 2027/
-# etc.
-#
-#
-# Generates:
-#
-# Outlook:
-#   Email -> time.ics
-#
-# iCloud:
-#   docs/time.ics
+# python scripts/sendEmail.py . --full
 #
 # ======================================================================
 
@@ -788,7 +829,7 @@ if __name__ == "__main__":
     if len(sys.argv) < 2:
 
         print(
-            "Usage: python sendEmail.py <file-or-folder>"
+            "Usage: python sendEmail.py <file-or-folder> [--full]"
         )
 
         sys.exit(1)
@@ -797,10 +838,13 @@ if __name__ == "__main__":
 
     input_path = sys.argv[1]
 
+    full_refresh = "--full" in sys.argv
+
 
 
     markdown_files = find_markdown_files(
-        input_path
+        input_path,
+        full_refresh=full_refresh
     )
 
 
@@ -808,7 +852,7 @@ if __name__ == "__main__":
     if not markdown_files:
 
         print(
-            "No markdown files found."
+            "No markdown files to process."
         )
 
         sys.exit(0)
@@ -829,14 +873,18 @@ if __name__ == "__main__":
 
 
     # --------------------------------------------------------------
-    # Parse all markdown files
+    # Parse target markdown files
     # --------------------------------------------------------------
 
-    all_entries = []
+    target_entries = []
 
 
 
     for file in markdown_files:
+
+        if not os.path.exists(file):
+
+            continue
 
 
         with open(
@@ -854,44 +902,40 @@ if __name__ == "__main__":
         )
 
 
-        all_entries.extend(
+        target_entries.extend(
             entries
         )
 
 
 
-    if not all_entries:
+    if not target_entries:
 
         print(
-            "No calendar entries found."
+            "No calendar entries found in target files."
         )
 
         sys.exit(0)
 
 
 
-    # --------------------------------------------------------------
-    # Sort events by date
-    # --------------------------------------------------------------
-
-    all_entries.sort(
+    target_entries.sort(
         key=lambda x: x["date"]
     )
 
 
 
     print(
-        f"Total calendar entries: {len(all_entries)}"
+        f"Total calendar entries processed: {len(target_entries)}"
     )
 
 
 
     # --------------------------------------------------------------
-    # Generate Outlook ICS
+    # Generate Outlook ICS (Contains current targets)
     # --------------------------------------------------------------
 
     outlook_ics = create_outlook_ics(
-        all_entries
+        target_entries
     )
 
 
@@ -901,15 +945,6 @@ if __name__ == "__main__":
         "utf-8"
     )
 
-
-
-    # Outlook email:
-    #
-    # Subject:
-    #   Work Log ICS: time
-    #
-    # Attachment:
-    #   time.ics
 
     send_email(
         outlook_base64,
@@ -921,10 +956,47 @@ if __name__ == "__main__":
     # --------------------------------------------------------------
     # Generate iCloud ICS
     # --------------------------------------------------------------
+    # If incremental, reload all files so docs/time.ics stays complete.
+    # If --full, we already parsed everything.
 
-    icloud_ics = create_icloud_ics(
-        all_entries
-    )
+    if not full_refresh:
+
+        print("Re-scanning all markdown files to keep iCloud feed complete...")
+
+        all_markdown_files = find_markdown_files(
+            input_path,
+            full_refresh=True
+        )
+
+        absolute_all_entries = []
+
+        for file in all_markdown_files:
+
+            with open(
+                file,
+                "r",
+                encoding="utf-8"
+            ) as f:
+
+                absolute_all_entries.extend(
+                    parse_checklist_log(
+                        f.read()
+                    )
+                )
+
+        absolute_all_entries.sort(
+            key=lambda x: x["date"]
+        )
+
+        icloud_ics = create_icloud_ics(
+            absolute_all_entries
+        )
+
+    else:
+
+        icloud_ics = create_icloud_ics(
+            target_entries
+        )
 
 
 
