@@ -7,6 +7,12 @@ on:
       - 'scripts/**/*.py'
 
   workflow_dispatch:
+    inputs:
+      full_refresh:
+        description: 'Force full refresh (rebuild all events)'
+        required: false
+        type: boolean
+        default: false
 
 
 permissions:
@@ -68,20 +74,6 @@ jobs:
 
       # --------------------------------------------------------------
       # Generate calendars
-      #
-      # The Python script scans the entire repository:
-      #
-      #   .
-      #   ├── 2026/
-      #   ├── 2027/
-      #   └── other markdown folders
-      #
-      # It creates:
-      #
-      #   Outlook ICS -> emailed
-      #
-      #   docs/time.ics -> GitHub Pages -> iCloud
-      #
       # --------------------------------------------------------------
 
       - name: Generate calendars and send Outlook ICS
@@ -96,18 +88,19 @@ jobs:
 
 
         run: |
-
-          python scripts/sendEmail.py .
+          # If triggered manually and full_refresh is true, pass --full argument
+          if [ "${{ github.event.inputs.full_refresh }}" = "true" ]; then
+            echo "Running with FULL REFRESH..."
+            python scripts/sendEmail.py . --full
+          else
+            echo "Running incrementally..."
+            python scripts/sendEmail.py .
+          fi
 
 
 
       # --------------------------------------------------------------
       # Commit iCloud calendar feed
-      #
-      # Generated file:
-      #
-      #   docs/time.ics
-      #
       # --------------------------------------------------------------
 
       - name: Commit iCloud calendar feed
