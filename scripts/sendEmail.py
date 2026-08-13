@@ -19,7 +19,6 @@ def find_markdown_files(path, full_refresh=False):
 
     markdown_files = []
 
-
     # If it's a full refresh or not a git repository, scan everything
     if full_refresh or not os.path.exists(os.path.join(path, ".git")):
 
@@ -48,8 +47,6 @@ def find_markdown_files(path, full_refresh=False):
 
         return markdown_files
 
-
-
     # Incremental mode: Ask Git what files changed in the latest commit
     try:
 
@@ -65,7 +62,6 @@ def find_markdown_files(path, full_refresh=False):
 
         changed_files = result.stdout.splitlines()
 
-
         result_untracked = subprocess.run(
             ["git", "ls-files", "--others", "--exclude-standard"],
             stdout=subprocess.PIPE,
@@ -76,9 +72,7 @@ def find_markdown_files(path, full_refresh=False):
 
         untracked_files = result_untracked.stdout.splitlines()
 
-
         all_changed = set(changed_files + untracked_files)
-
 
         for file in all_changed:
 
@@ -86,18 +80,15 @@ def find_markdown_files(path, full_refresh=False):
 
                 markdown_files.append(file)
 
-
         if not markdown_files:
 
             print("Git reports no markdown files changed in this commit.")
-
 
     except Exception as e:
 
         print(f"Git diff failed ({e}), falling back to full scan...")
 
         return find_markdown_files(path, full_refresh=True)
-
 
     return markdown_files
 
@@ -117,32 +108,25 @@ def parse_checklist_log(file_content):
         r'(.*?)(?=\n\s*-\s*\[[ xX]\]\s*\*\*\d{4}-\d{2}-\d{2}|\Z)'
     )
 
-
     matches = re.findall(
         pattern,
         file_content,
         re.DOTALL
     )
 
-
     entries = []
-
 
     for status, date_str, content in matches:
 
-
         raw_content = content.strip()
 
-
         lines = raw_content.split("\n")
-
 
         title = (
             lines[0]
             .strip()
             .lstrip(":- ")
         )
-
 
         body_lines = [
 
@@ -154,11 +138,9 @@ def parse_checklist_log(file_content):
 
         ]
 
-
         cleaned_content = "\n".join(
             body_lines
         )
-
 
         cleaned_content = re.sub(
             r'\n\s*[-*]\s+',
@@ -166,13 +148,10 @@ def parse_checklist_log(file_content):
             cleaned_content
         )
 
-
         clean_date = re.search(
             r'\d{4}-\d{2}-\d{2}',
             date_str
         ).group(0)
-
-
 
         entries.append(
             {
@@ -192,7 +171,6 @@ def parse_checklist_log(file_content):
             }
         )
 
-
     return entries
 
 
@@ -205,14 +183,12 @@ def parse_checklist_log(file_content):
 
 def clean_markdown(text):
 
-
     # Remove bold formatting
     text = re.sub(
         r"\*\*(.*?)\*\*",
         r"\1",
         text
     )
-
 
     # Remove italic formatting
     text = re.sub(
@@ -221,13 +197,11 @@ def clean_markdown(text):
         text
     )
 
-
     # Remove inline code markers
     text = text.replace(
         "`",
         ""
     )
-
 
     return text.strip()
 
@@ -250,7 +224,6 @@ def is_public_holiday(entry):
         + entry.get("content", "")
 
     )
-
 
     return (
 
@@ -275,7 +248,6 @@ def is_out_of_office(entry):
         + entry.get("content", "")
 
     )
-
 
     patterns = [
 
@@ -305,18 +277,20 @@ def is_out_of_office(entry):
 
     ]
 
+    match_general = any(
+        re.search(pattern, text, re.IGNORECASE)
+        for pattern in patterns
+    )
+
+    match_uppercase_off = re.search(r"\bOFF\b", text) is not None
 
     return (
 
         is_public_holiday(entry)
 
-        or any(
+        or match_general
 
-            re.search(pattern, text, re.IGNORECASE)
-
-            for pattern in patterns
-
-        )
+        or match_uppercase_off
 
     )
 
@@ -336,7 +310,6 @@ def is_wfh(entry):
 
     ).lower()
 
-
     keywords = [
 
         "wfh",
@@ -348,7 +321,6 @@ def is_wfh(entry):
         "work from home"
 
     ]
-
 
     return any(
 
@@ -368,7 +340,6 @@ def is_customer_visit(entry):
         "title",
         ""
     )
-
 
     return (
 
@@ -390,14 +361,12 @@ def is_customer_visit(entry):
 
 def get_icloud_summary(entry):
 
-
     title = clean_markdown(
         entry.get(
             "title",
             ""
         )
     )
-
 
     content = clean_markdown(
         entry.get(
@@ -406,39 +375,28 @@ def get_icloud_summary(entry):
         )
     )
 
-
     combined = (
         title
         + " "
         + content
     ).lower()
 
-
-
     # Preserve public holiday names
     if is_public_holiday(entry):
 
         return title
 
-
-
     if is_out_of_office(entry):
 
         return "🌴 休み"
-
-
 
     if is_customer_visit(entry):
 
         return "🏢 客先"
 
-
-
     if is_wfh(entry):
 
         return "🏠 在宅"
-
-
 
     return "🏢 出社"
 
@@ -463,35 +421,26 @@ def create_outlook_ics(entries):
 
     cal = Calendar()
 
-
     cal.add(
         "prodid",
         "-//Worklog Automation//mxp//"
     )
-
 
     cal.add(
         "version",
         "2.0"
     )
 
-
-
     for entry in entries:
-
 
         event = Event()
 
-
-
         if is_out_of_office(entry):
-
 
             event.add(
                 "summary",
                 "Out of Office"
             )
-
 
             # Outlook OOF availability status
 
@@ -503,7 +452,6 @@ def create_outlook_ics(entries):
                 }
             )
 
-
             event.add(
                 "X-MICROSOFT-CDO-INTENDEDSTATUS",
                 "OOF",
@@ -512,17 +460,12 @@ def create_outlook_ics(entries):
                 }
             )
 
-
-
         else:
-
 
             event.add(
                 "summary",
                 f"Work Log: {entry['date']}"
             )
-
-
 
             if is_customer_visit(entry):
 
@@ -531,7 +474,6 @@ def create_outlook_ics(entries):
                     "Customer Visit"
                 )
 
-
             elif is_wfh(entry):
 
                 event.add(
@@ -539,12 +481,9 @@ def create_outlook_ics(entries):
                     "WFH"
                 )
 
-
-
         # Outlook receives full descriptions
 
         description = entry["content"]
-
 
         description = re.sub(
             r"\s*\*\s+",
@@ -552,53 +491,40 @@ def create_outlook_ics(entries):
             description
         )
 
-
         description = re.sub(
             r"\s*-\s+",
             "\r\n• ",
             description
         )
 
-
         event.add(
             "description",
             description
         )
-
-
 
         d = datetime.strptime(
             entry["date"],
             "%Y-%m-%d"
         ).date()
 
-
-
         event.add(
             "dtstart",
             d
         )
-
 
         event.add(
             "dtend",
             d + timedelta(days=1)
         )
 
-
-
         event.add(
             "uid",
             f"outlook-{entry['date']}@worklog"
         )
 
-
-
         cal.add_component(
             event
         )
-
-
 
     return cal.to_ical()
 
@@ -630,20 +556,15 @@ def create_icloud_ics(entries):
 
     cal = Calendar()
 
-
-
     cal.add(
         "prodid",
         "-//Worklog Automation iCloud//mxp//"
     )
 
-
     cal.add(
         "version",
         "2.0"
     )
-
-
 
     # iCloud subscribed calendar name
 
@@ -652,60 +573,43 @@ def create_icloud_ics(entries):
         "仕事"
     )
 
-
     cal.add(
         "X-WR-CALDESC",
         "自動生成された勤務予定"
     )
 
-
-
     for entry in entries:
 
-
         event = Event()
-
-
 
         event.add(
             "summary",
             get_icloud_summary(entry)
         )
 
-
-
         d = datetime.strptime(
             entry["date"],
             "%Y-%m-%d"
         ).date()
-
-
 
         event.add(
             "dtstart",
             d
         )
 
-
         event.add(
             "dtend",
             d + timedelta(days=1)
         )
-
-
 
         event.add(
             "uid",
             f"icloud-{entry['date']}@worklog"
         )
 
-
-
         cal.add_component(
             event
         )
-
-
 
     return cal.to_ical()
 
@@ -728,33 +632,25 @@ def create_icloud_ics(entries):
 
 def send_email(ics_content, file_name):
 
-
     connection_string = os.environ[
         "AZURE_COMMUNICATION_CONNECTION_STRING"
     ]
-
 
     client = EmailClient.from_connection_string(
         connection_string
     )
 
-
     sender_address = os.environ[
         "SENDER_EMAIL"
     ]
-
 
     recipient_address = os.environ[
         "RECIPIENT_EMAIL"
     ]
 
-
-
     message = {
 
-
         "senderAddress": sender_address,
-
 
         "recipients": {
 
@@ -768,20 +664,17 @@ def send_email(ics_content, file_name):
 
         },
 
-
         "content": {
 
             "subject": (
                 f"Work Log ICS: {file_name}"
             ),
 
-
             "plainText": (
                 "Import the attached ics file."
             )
 
         },
-
 
         "attachments": [
 
@@ -799,18 +692,15 @@ def send_email(ics_content, file_name):
 
     }
 
-
-
     poller = client.begin_send(
         message
     )
-
 
     print(
         f"Email send result: {poller.result()}"
     )
 
-    # ======================================================================
+# ======================================================================
 # Main execution
 # ======================================================================
 #
@@ -824,7 +714,6 @@ def send_email(ics_content, file_name):
 
 if __name__ == "__main__":
 
-
     if len(sys.argv) < 2:
 
         print(
@@ -833,20 +722,14 @@ if __name__ == "__main__":
 
         sys.exit(1)
 
-
-
     input_path = sys.argv[1]
 
     full_refresh = "--full" in sys.argv
-
-
 
     markdown_files = find_markdown_files(
         input_path,
         full_refresh=full_refresh
     )
-
-
 
     if not markdown_files:
 
@@ -856,12 +739,9 @@ if __name__ == "__main__":
 
         sys.exit(0)
 
-
-
     print(
         "Markdown files discovered:"
     )
-
 
     for file in markdown_files:
 
@@ -869,22 +749,17 @@ if __name__ == "__main__":
             f" - {file}"
         )
 
-
-
     # --------------------------------------------------------------
     # Parse target markdown files
     # --------------------------------------------------------------
 
     target_entries = []
 
-
-
     for file in markdown_files:
 
         if not os.path.exists(file):
 
             continue
-
 
         with open(
             file,
@@ -894,18 +769,13 @@ if __name__ == "__main__":
 
             content = f.read()
 
-
-
         entries = parse_checklist_log(
             content
         )
 
-
         target_entries.extend(
             entries
         )
-
-
 
     if not target_entries:
 
@@ -915,19 +785,13 @@ if __name__ == "__main__":
 
         sys.exit(0)
 
-
-
     target_entries.sort(
         key=lambda x: x["date"]
     )
 
-
-
     print(
         f"Total calendar entries processed: {len(target_entries)}"
     )
-
-
 
     # --------------------------------------------------------------
     # Generate Outlook ICS (Contains current targets)
@@ -937,20 +801,16 @@ if __name__ == "__main__":
         target_entries
     )
 
-
     outlook_base64 = base64.b64encode(
         outlook_ics
     ).decode(
         "utf-8"
     )
 
-
     send_email(
         outlook_base64,
         "time"
     )
-
-
 
     # --------------------------------------------------------------
     # Generate iCloud ICS
@@ -997,14 +857,10 @@ if __name__ == "__main__":
             target_entries
         )
 
-
-
     os.makedirs(
         "docs",
         exist_ok=True
     )
-
-
 
     with open(
         "docs/time.ics",
@@ -1014,8 +870,6 @@ if __name__ == "__main__":
         f.write(
             icloud_ics
         )
-
-
 
     print(
         "Created iCloud calendar feed: docs/time.ics"
