@@ -97,36 +97,33 @@ def find_markdown_files(path, full_refresh=False):
 
 
 # ======================================================================
-# Markdown checklist parser
+# Markdown heading log parser
 # ======================================================================
 
 def parse_checklist_log(file_content):
 
+    # Updated pattern to match heading-based dates: ## **YYYY-MM-DD (Day)**: ...
     pattern = (
-        r'-\s*\[[ xX]?\]\s*'
-        r'\*\*(\d{4}-\d{2}-\d{2}\s*\([^)]+\))\*\*'
-        r'(.*?)(?=\n\s*-\s*\[[ xX]?\]\s*\*\*\d{4}-\d{2}-\d{2}|\Z)'
+        r'##\s*'
+        r'(\*\*\d{4}-\d{2}-\d{2}\s*\([^)]+\)\*\*.*?)'
+        r'(?=\n\s*##|\Z)'
     )
 
     matches = re.findall(
         pattern,
         file_content,
-        re.DOTALL
+        re.DOTALL | re.MULTILINE
     )
 
     entries = []
 
-    for date_str, content in matches:
+    for match in matches:
 
-        raw_content = content.strip()
+        raw_content = match.strip()
 
         lines = raw_content.split("\n")
 
-        title = (
-            lines[0]
-            .strip()
-            .lstrip(":- ")
-        )
+        title = lines[0].strip()
 
         body_lines = [
 
@@ -150,7 +147,7 @@ def parse_checklist_log(file_content):
 
         clean_date = re.search(
             r'\d{4}-\d{2}-\d{2}',
-            date_str
+            title
         ).group(0)
 
         entries.append(
