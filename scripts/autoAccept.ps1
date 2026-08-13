@@ -335,17 +335,15 @@ try {
             }
         }
 
-        # MOVE TO DELETED ITEMS DIRECTLY USING RETAINED REFERENCE
+        # DELETE PROCESSED EMAIL DIRECTLY
         Write-Host ""
-        Write-Host "Moving processed email to Deleted Items..."
+        Write-Host "Deleting processed email..."
         try {
-            $destFolder = $namespace.GetDefaultFolder(3)
-            $targetMail.Move($destFolder)
-            [Runtime.InteropServices.Marshal]::ReleaseComObject($destFolder) | Out-Null
-            Write-Host "✓ Email successfully moved."
+            $targetMail.Delete()
+            Write-Host "✓ Email successfully deleted."
         }
         catch {
-            Write-Host "Warning: Direct move encountered issue: $_"
+            Write-Host "Warning: Deletion encountered issue: $_"
         }
     }
 
