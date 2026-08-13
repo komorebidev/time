@@ -460,6 +460,12 @@ def create_outlook_ics(entries):
                 f"Work Log: {entry['date']}"
             )
 
+            # Set work log events to Free instead of Busy
+            event.add(
+                "transp",
+                "TRANSPARENT"
+            )
+
             if is_customer_visit(entry):
 
                 event.add(
