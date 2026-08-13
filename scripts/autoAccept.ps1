@@ -340,7 +340,7 @@ try {
         Write-Host "Deleting processed email..."
         try {
             $targetMail.Delete()
-            Write-Host "✓ Email successfully deleted."
+            Write-Host "Email successfully deleted."
         }
         catch {
             Write-Host "Warning: Deletion encountered issue: $_"
