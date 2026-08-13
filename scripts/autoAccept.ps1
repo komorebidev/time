@@ -109,7 +109,8 @@ function Read-IcsEvents {
         if ($null -eq $current) { continue }
 
         $parts = $line -split ":", 2
-        if ($parts.Count -ne 2) { continue }
+        $partsCount = $parts.Count
+        if ($partsCount -ne 2) { continue }
 
         $propertyName = ($parts[0] -split ";")[0].ToUpper()
         $current.Properties[$propertyName] = $parts[1]
@@ -243,6 +244,9 @@ try {
 
         if (Test-Path $TempICS) { Remove-Item $TempICS -Force -ErrorAction SilentlyContinue }
 
+        Write-Host ""
+        Write-Host "Processing ICS events..."
+
         foreach ($icsEvent in $events) {
             $properties = $icsEvent.Properties
             $uid = $properties["UID"]
@@ -257,9 +261,12 @@ try {
                 $end = Parse-IcsDate($properties["DTEND"])
             }
             catch {
+                Write-Host "  [SKIP] Invalid date format for event: $summary" -ForegroundColor Yellow
                 $skippedCount++
                 continue
             }
+
+            Write-Host "  -> Processing: '$summary' ($($start.ToString('yyyy-MM-dd')))..." -NoNewline
 
             $existing = Find-ExistingWorklogEvent -Calendar $calendar -UID $uid -Summary $summary -Start $start
 
@@ -279,9 +286,12 @@ try {
 
                 [Runtime.InteropServices.Marshal]::ReleaseComObject($uidProperty) | Out-Null
                 [Runtime.InteropServices.Marshal]::ReleaseComObject($appointment) | Out-Null
+                
+                Write-Host " [CREATED]" -ForegroundColor Green
                 $createdCount++
             }
             else {
+                Write-Host " [SKIPPED - Already Exists]" -ForegroundColor DarkGray
                 $skippedCount++
             }
         }
