@@ -31,7 +31,7 @@ function Connect-Outlook {
             if ($null -eq $outlook) {
                 throw "No active instance found."
             }
-            Write-Host "✓ Connected to active Outlook instance"
+            Write-Host "[OK] Connected to active Outlook instance"
             break
         }
         catch {
@@ -39,7 +39,7 @@ function Connect-Outlook {
                 $outlookType = [Type]::GetTypeFromProgID("Outlook.Application")
                 $outlook = [Activator]::CreateInstance($outlookType)
                 $script:StartedOutlookByScript = $true
-                Write-Host "✓ Created background Outlook COM instance"
+                Write-Host "[OK] Created background Outlook COM instance"
                 break
             }
             catch {
@@ -294,7 +294,6 @@ try {
                 $createdCount++
             }
             else {
-                # Normalize values to prevent false positives from null/empty mismatches or line endings
                 $normExistingBody = if ($null -eq $existing.Body) { "" } else { "$($existing.Body)".Replace("`r`n", "`n").Trim() }
                 $normNewBody = if ($null -eq $description) { "" } else { "$description".Replace("`r`n", "`n").Trim() }
 
@@ -344,7 +343,6 @@ try {
             }
         }
 
-        # DELETE PROCESSED EMAIL DIRECTLY USING FRESH ENTRY ID REFERENCE
         Write-Host ""
         Write-Host "Deleting processed email..."
         try {
@@ -355,7 +353,7 @@ try {
             $itemToDelete = $namespace.GetItemFromID($targetMailEntryId)
             $itemToDelete.Delete()
             [Runtime.InteropServices.Marshal]::ReleaseComObject($itemToDelete) | Out-Null
-            Write-Host "✓ Email successfully deleted."
+            Write-Host "[OK] Email successfully deleted."
         }
         catch {
             Write-Host "Warning: Deletion encountered issue: $_"
