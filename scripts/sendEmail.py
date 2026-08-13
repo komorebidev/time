@@ -284,7 +284,8 @@ def is_out_of_office(entry):
         for pattern in patterns
     )
 
-    match_uppercase_off = re.search(r"\bOFF\b", text) is not None
+    # Strictly matches capitalized "Off", but ignores "off" and "OFF"
+    match_capitalized_off = re.search(r"\bOff\b", text) is not None
 
     return (
 
@@ -292,7 +293,7 @@ def is_out_of_office(entry):
 
         or match_general
 
-        or match_uppercase_off
+        or match_capitalized_off
 
     )
 
