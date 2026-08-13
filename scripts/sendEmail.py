@@ -253,6 +253,8 @@ def is_out_of_office(entry):
 
         r"\bday[\s-]?off\b",
 
+        r"\b(am|pm)[\s-]?off\b",
+
         r"\btaking\s+leave\b",
 
         r"\bpaid\s+leave\b",
