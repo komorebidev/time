@@ -168,6 +168,7 @@ $calendar = $null
 $targetMail = $null
 $icsAttachment = $null
 $createdCount = 0
+$updatedCount = 0
 $skippedCount = 0
 $scriptFailed = $false
 
@@ -291,8 +292,46 @@ try {
                 $createdCount++
             }
             else {
-                Write-Host " [SKIPPED - Already Exists]" -ForegroundColor DarkGray
-                $skippedCount++
+                $existingStart = [datetime]$existing.Start
+                $existingEnd = [datetime]$existing.End
+                $targetBusyStatus = if ($summary -eq "Out of Office") { 3 } else { 2 }
+
+                $hasChanges = (
+                    $existing.Subject -ne $summary -or
+                    $existingStart -ne $start -or
+                    $existingEnd -ne $end -or
+                    $existing.Body -ne $description -or
+                    $existing.Location -ne $location -or
+                    $existing.BusyStatus -ne $targetBusyStatus
+                )
+
+                if ($hasChanges) {
+                    $existing.Subject = $summary
+                    $existing.Start = $start
+                    $existing.End = $end
+                    $existing.AllDayEvent = $true
+                    $existing.Body = $description
+                    $existing.Location = $location
+                    $existing.BusyStatus = $targetBusyStatus
+
+                    $uidProperty = $existing.UserProperties.Find("WorklogUID")
+                    if ($null -eq $uidProperty) {
+                        $uidProperty = $existing.UserProperties.Add("WorklogUID", 1, $false)
+                    }
+                    $uidProperty.Value = $uid
+                    
+                    $existing.Save()
+                    if ($uidProperty) { [Runtime.InteropServices.Marshal]::ReleaseComObject($uidProperty) | Out-Null }
+                    [Runtime.InteropServices.Marshal]::ReleaseComObject($existing) | Out-Null
+
+                    Write-Host " [UPDATED]" -ForegroundColor Cyan
+                    $updatedCount++
+                }
+                else {
+                    [Runtime.InteropServices.Marshal]::ReleaseComObject($existing) | Out-Null
+                    Write-Host " [SKIPPED - No Changes]" -ForegroundColor DarkGray
+                    $skippedCount++
+                }
             }
         }
 
@@ -338,7 +377,7 @@ finally {
 
     Write-Host ""
     Write-Host "========================================"
-    Write-Host "FINISHED. Created: $createdCount | Skipped: $skippedCount"
+    Write-Host "FINISHED. Created: $createdCount | Updated: $updatedCount | Skipped: $skippedCount"
     Write-Host "========================================"
 
     Write-Host "Closing in 5 seconds... Press any key to stay open."
