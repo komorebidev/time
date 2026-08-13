@@ -158,7 +158,7 @@ def parse_checklist_log(file_content):
                 "content": (
                     cleaned_content
                     if cleaned_content
-                    else title
+                    else ""
                 )
             }
         )
@@ -419,6 +419,11 @@ def create_outlook_ics(entries):
         "2.0"
     )
 
+    cal.add(
+        "method",
+        "REQUEST"
+    )
+
     for entry in entries:
 
         event = Event()
@@ -508,6 +513,16 @@ def create_outlook_ics(entries):
         event.add(
             "uid",
             f"outlook-{entry['date']}@worklog"
+        )
+
+        event.add(
+            "sequence",
+            1
+        )
+
+        event.add(
+            "dtstamp",
+            datetime.utcnow()
         )
 
         cal.add_component(
