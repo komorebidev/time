@@ -777,8 +777,7 @@ def send_email(ics_content, file_name):
 
 
             "plainText": (
-                "Attached are your work calendar records "
-                "generated from markdown files."
+                "Import the attached ics file."
             )
 
         },
