@@ -1,18 +1,18 @@
 # ============================================================
-# Interactive Scheduled Task Setup (Idle-Triggered)
+# Interactive Scheduled Task Setup (Idle/Interval + Lock Check)
 #
 # Creates a Windows Scheduled Task for a PowerShell script.
 #
 # Features:
 #   - Interactive script-path prompt
 #   - Interactive task-name prompt
-#   - Interactive idle-duration prompt (defaults to 20 minutes)
+#   - Interactive interval prompt (e.g., every 5 minutes)
+#   - Interactive idle-duration prompt (e.g., idle check)
 #   - Runs PowerShell hidden
 #   - Runs only when the current user is logged in
 #   - Prevents overlapping executions
-#   - Runs ONLY when the computer is idle (respects user activity)
+#   - Skips / cancels if the PC is locked (via script guard clause)
 #   - Restarts after failures
-#   - Can immediately test the task
 # ============================================================
 
 $ErrorActionPreference = "Stop"
@@ -26,20 +26,13 @@ Clear-Host
 
 Write-Host ""
 Write-Host "=============================================="
-Write-Host " PowerShell Scheduled Task Setup (Idle-Based)"
+Write-Host " PowerShell Scheduled Task Setup (Interval + Idle)"
 Write-Host "=============================================="
 Write-Host ""
 
-Write-Host "This will create a scheduled task that runs"
-Write-Host "a PowerShell script silently when you are idle."
-Write-Host ""
-
-Write-Host "The task will:"
-Write-Host "  - Run only when you are logged in"
-Write-Host "  - Run with no visible PowerShell window"
-Write-Host "  - Prevent overlapping instances"
-Write-Host "  - Run ONLY when the PC has been idle for the set duration"
-Write-Host "  - Restart after failures"
+Write-Host "This will create a scheduled task that checks your"
+Write-Host "script periodically, ensuring it only runs when you"
+Write-Host "are logged in and your PC is not locked."
 Write-Host ""
 
 
@@ -53,9 +46,6 @@ while ($true) {
 
     $scriptPath = Read-Host `
         "Enter the full path to the PowerShell script to schedule"
-
-    # Remove surrounding quotes if the user pasted:
-    # "C:\Worklog\Import-WorklogICS.ps1"
 
     $scriptPath = $scriptPath.Trim().Trim('"')
 
@@ -111,20 +101,57 @@ if ([string]::IsNullOrWhiteSpace($taskName)) {
 
 
 # ============================================================
-# ASK FOR IDLE DURATION
+# ASK FOR INTERVAL (e.g., Every X minutes)
 # ============================================================
 
 Write-Host ""
 
-$defaultIdleMinutes = 20
+$defaultIntervalMinutes = 5
+
+while ($true) {
+
+    $intervalInput = Read-Host `
+        "Run every how many minutes? [$defaultIntervalMinutes]"
+
+    if ([string]::IsNullOrWhiteSpace($intervalInput)) {
+
+        $intervalMinutes = $defaultIntervalMinutes
+
+        break
+    }
+
+    try {
+
+        $intervalMinutes = [int]$intervalInput
+
+    }
+    catch {
+
+        $intervalMinutes = 0
+    }
+
+    if ($intervalMinutes -ge 1) {
+
+        break
+    }
+
+    Write-Host ""
+    Write-Host "ERROR: Please enter a whole number of at least 1."
+}
+
+
+# ============================================================
+# ASK FOR IDLE DURATION (Optional idle requirement)
+# ============================================================
+
+Write-Host ""
+
+$defaultIdleMinutes = 0
 
 while ($true) {
 
     $idleInput = Read-Host `
-        "Run after how many minutes of computer idle time? [$defaultIdleMinutes]"
-
-
-    # Blank = use default
+        "Require how many minutes of system idle time? (Enter 0 for none) [$defaultIdleMinutes]"
 
     if ([string]::IsNullOrWhiteSpace($idleInput)) {
 
@@ -133,9 +160,6 @@ while ($true) {
         break
     }
 
-
-    # Safely convert the user's input to an integer
-
     try {
 
         $idleMinutes = [int]$idleInput
@@ -143,18 +167,16 @@ while ($true) {
     }
     catch {
 
-        $idleMinutes = 0
+        $idleMinutes = -1
     }
 
-
-    if ($idleMinutes -ge 1) {
+    if ($idleMinutes -ge 0) {
 
         break
     }
 
-
     Write-Host ""
-    Write-Host "ERROR: Please enter a whole number of at least 1."
+    Write-Host "ERROR: Please enter 0 or a positive whole number."
 }
 
 
@@ -178,8 +200,14 @@ Write-Host "  $scriptPath"
 
 Write-Host ""
 
-Write-Host "Condition:"
-Write-Host "  Runs after $idleMinutes minute(s) of system idle time"
+Write-Host "Schedule:"
+Write-Host "  Triggers every $intervalMinutes minute(s)"
+
+if ($idleMinutes -gt 0) {
+
+    Write-Host "Idle Requirement:"
+    Write-Host "  Requires $idleMinutes minute(s) of system idle time"
+}
 
 Write-Host ""
 
@@ -189,12 +217,7 @@ Write-Host "  $env:USERDOMAIN\$env:USERNAME"
 Write-Host ""
 
 Write-Host "Run mode:"
-Write-Host "  Only when user is logged in"
-
-Write-Host ""
-
-Write-Host "PowerShell window:"
-Write-Host "  Hidden"
+Write-Host "  Only when user is logged in (Exits if locked)"
 
 Write-Host ""
 
@@ -293,26 +316,16 @@ $action = New-ScheduledTaskAction `
 
 
 # ============================================================
-# CREATE TRIGGER
-#
-# We set up a background recurrence matching your idle window 
-# so Windows constantly checks if the criteria are met.
+# CREATE TRIGGER (Repeating Interval)
 # ============================================================
 
 $startTime = (Get-Date).AddMinutes(1)
 
-$repetitionInterval = `
-    New-TimeSpan -Minutes $idleMinutes
-
-$repetitionDuration = `
-    New-TimeSpan -Days 3650
-
-
 $trigger = New-ScheduledTaskTrigger `
     -Once `
     -At $startTime `
-    -RepetitionInterval $repetitionInterval `
-    -RepetitionDuration $repetitionDuration
+    -RepetitionInterval (New-TimeSpan -Minutes $intervalMinutes) `
+    -RepetitionDuration (New-TimeSpan -Days 3650)
 
 
 # ============================================================
@@ -330,25 +343,29 @@ $principal = New-ScheduledTaskPrincipal `
 
 
 # ============================================================
-# CREATE SETTINGS (Idle-Enforced)
-#
-# RunOnlyIfIdle
-#   Forces Windows to skip execution unless system is idle.
-# IdleDuration
-#   Dictates how long the system must remain untouched before
-#   the trigger criteria are validated.
+# CREATE SETTINGS
 # ============================================================
 
-$settings = New-ScheduledTaskSettingsSet `
-    -AllowStartIfOnBatteries `
-    -DontStopIfGoingOnBatteries `
-    -RunOnlyIfIdle `
-    -IdleDuration (New-TimeSpan -Minutes $idleMinutes) `
-    -MultipleInstances IgnoreNew `
-    -RestartCount 3 `
-    -RestartInterval (
-        New-TimeSpan -Minutes 5
-    )
+if ($idleMinutes -gt 0) {
+
+    $settings = New-ScheduledTaskSettingsSet `
+        -AllowStartIfOnBatteries `
+        -DontStopIfGoingOnBatteries `
+        -RunOnlyIfIdle `
+        -IdleDuration (New-TimeSpan -Minutes $idleMinutes) `
+        -MultipleInstances IgnoreNew `
+        -RestartCount 3 `
+        -RestartInterval (New-TimeSpan -Minutes 5)
+}
+else {
+
+    $settings = New-ScheduledTaskSettingsSet `
+        -AllowStartIfOnBatteries `
+        -DontStopIfGoingOnBatteries `
+        -MultipleInstances IgnoreNew `
+        -RestartCount 3 `
+        -RestartInterval (New-TimeSpan -Minutes 5)
+}
 
 
 # ============================================================
@@ -365,7 +382,7 @@ Register-ScheduledTask `
     -Principal $principal `
     -Settings $settings `
     -Description `
-        "Automatically runs the Worklog Outlook ICS importer when idle."
+        "Automatically runs the Worklog Outlook ICS importer periodically, skipping if locked."
 
 
 # ============================================================
@@ -388,23 +405,19 @@ Write-Host "  $scriptPath"
 
 Write-Host ""
 
-Write-Host "Condition:"
-Write-Host "  Runs after $idleMinutes minute(s) of system idle time"
+Write-Host "Schedule:"
+Write-Host "  Triggers every $intervalMinutes minute(s)"
+
+if ($idleMinutes -gt 0) {
+
+    Write-Host "Idle Requirement:"
+    Write-Host "  Requires $idleMinutes minute(s) of system idle time"
+}
 
 Write-Host ""
 
-Write-Host "PowerShell window:"
-Write-Host "  Hidden"
-
-Write-Host ""
-
-Write-Host "First check starts:"
-Write-Host "  Approximately $startTime"
-
-Write-Host ""
-
-Write-Host "Run mode:"
-Write-Host "  Only while you are logged in and idle"
+Write-Host "Lock Protection:"
+Write-Host "  Script guard clause skips execution if PC is locked"
 
 Write-Host ""
 
@@ -443,10 +456,6 @@ if (
     Write-Host ""
 
     Write-Host "Task started successfully."
-
-    Write-Host ""
-    Write-Host "Because PowerShell is configured as hidden,"
-    Write-Host "no PowerShell window should appear."
 }
 
 
