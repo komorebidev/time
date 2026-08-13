@@ -1,18 +1,16 @@
-# Current version has behavior to run immediately if missed while locked
 # ============================================================
-# Interactive Scheduled Task Setup
+# Interactive Scheduled Task Setup (Idle-Triggered)
 #
 # Creates a Windows Scheduled Task for a PowerShell script.
 #
 # Features:
 #   - Interactive script-path prompt
 #   - Interactive task-name prompt
-#   - Interactive interval prompt
-#   - Defaults to 20 minutes
+#   - Interactive idle-duration prompt (defaults to 20 minutes)
 #   - Runs PowerShell hidden
 #   - Runs only when the current user is logged in
 #   - Prevents overlapping executions
-#   - Starts when the PC becomes available (and catches up if missed while locked/asleep)
+#   - Runs ONLY when the computer is idle (respects user activity)
 #   - Restarts after failures
 #   - Can immediately test the task
 # ============================================================
@@ -28,19 +26,19 @@ Clear-Host
 
 Write-Host ""
 Write-Host "=============================================="
-Write-Host " PowerShell Scheduled Task Setup"
+Write-Host " PowerShell Scheduled Task Setup (Idle-Based)"
 Write-Host "=============================================="
 Write-Host ""
 
 Write-Host "This will create a scheduled task that runs"
-Write-Host "a PowerShell script periodically and silently."
+Write-Host "a PowerShell script silently when you are idle."
 Write-Host ""
 
 Write-Host "The task will:"
 Write-Host "  - Run only when you are logged in"
 Write-Host "  - Run with no visible PowerShell window"
 Write-Host "  - Prevent overlapping instances"
-Write-Host "  - Start when the PC becomes available (catches up if missed while locked)"
+Write-Host "  - Run ONLY when the PC has been idle for the set duration"
 Write-Host "  - Restart after failures"
 Write-Host ""
 
@@ -113,24 +111,24 @@ if ([string]::IsNullOrWhiteSpace($taskName)) {
 
 
 # ============================================================
-# ASK FOR INTERVAL
+# ASK FOR IDLE DURATION
 # ============================================================
 
 Write-Host ""
 
-$defaultInterval = 20
+$defaultIdleMinutes = 20
 
 while ($true) {
 
-    $intervalInput = Read-Host `
-        "Run every how many minutes? [$defaultInterval]"
+    $idleInput = Read-Host `
+        "Run after how many minutes of computer idle time? [$defaultIdleMinutes]"
 
 
     # Blank = use default
 
-    if ([string]::IsNullOrWhiteSpace($intervalInput)) {
+    if ([string]::IsNullOrWhiteSpace($idleInput)) {
 
-        $intervalMinutes = $defaultInterval
+        $idleMinutes = $defaultIdleMinutes
 
         break
     }
@@ -140,16 +138,16 @@ while ($true) {
 
     try {
 
-        $intervalMinutes = [int]$intervalInput
+        $idleMinutes = [int]$idleInput
 
     }
     catch {
 
-        $intervalMinutes = 0
+        $idleMinutes = 0
     }
 
 
-    if ($intervalMinutes -ge 1) {
+    if ($idleMinutes -ge 1) {
 
         break
     }
@@ -180,8 +178,8 @@ Write-Host "  $scriptPath"
 
 Write-Host ""
 
-Write-Host "Interval:"
-Write-Host "  Every $intervalMinutes minute(s) (with lock catch-up)"
+Write-Host "Condition:"
+Write-Host "  Runs after $idleMinutes minute(s) of system idle time"
 
 Write-Host ""
 
@@ -264,9 +262,6 @@ if ($existingTask) {
 
 # ============================================================
 # FIND WINDOWS POWERSHELL
-#
-# We intentionally use Windows PowerShell 5.1 rather than
-# PowerShell 7 because the target script uses Outlook COM.
 # ============================================================
 
 $powerShellPath = Join-Path `
@@ -282,15 +277,6 @@ if (-not (Test-Path -LiteralPath $powerShellPath)) {
 
 # ============================================================
 # CREATE ACTION
-#
-# -NoProfile
-#       Avoids loading the user's PowerShell profile.
-#
-# -WindowStyle Hidden
-#       Prevents a PowerShell console window appearing.
-#
-# -ExecutionPolicy Bypass
-#       Allows the selected script to execute.
 # ============================================================
 
 $arguments = @(
@@ -309,20 +295,14 @@ $action = New-ScheduledTaskAction `
 # ============================================================
 # CREATE TRIGGER
 #
-# First run:
-#   Approximately one minute after setup.
-#
-# Then:
-#   Repeat at the selected interval.
-#
-# The 3650-day duration is approximately 10 years,
-# effectively making this a long-running repeating task.
+# We set up a background recurrence matching your idle window 
+# so Windows constantly checks if the criteria are met.
 # ============================================================
 
 $startTime = (Get-Date).AddMinutes(1)
 
 $repetitionInterval = `
-    New-TimeSpan -Minutes $intervalMinutes
+    New-TimeSpan -Minutes $idleMinutes
 
 $repetitionDuration = `
     New-TimeSpan -Days 3650
@@ -337,12 +317,6 @@ $trigger = New-ScheduledTaskTrigger `
 
 # ============================================================
 # CREATE PRINCIPAL
-#
-# InteractiveToken means:
-#
-#   Run only when the current user is logged in.
-#
-# This is important for Outlook COM automation.
 # ============================================================
 
 $currentUser = `
@@ -356,30 +330,20 @@ $principal = New-ScheduledTaskPrincipal `
 
 
 # ============================================================
-# CREATE SETTINGS
+# CREATE SETTINGS (Idle-Enforced)
 #
-# AllowStartIfOnBatteries
-#   Allows the task to run on battery.
-#
-# DontStopIfGoingOnBatteries
-#   Doesn't stop an active run when switching to battery.
-#
-# StartWhenAvailable
-#   Lets Windows run the task when it becomes available.
-#   (Combined with periodic triggers, this forces Windows to run
-#   missed execution cycles immediately if the PC was locked/asleep).
-#
-# MultipleInstances IgnoreNew
-#   Prevents overlapping executions.
-#
-# RestartCount / RestartInterval
-#   Retries failed task executions.
+# RunOnlyIfIdle
+#   Forces Windows to skip execution unless system is idle.
+# IdleDuration
+#   Dictates how long the system must remain untouched before
+#   the trigger criteria are validated.
 # ============================================================
 
 $settings = New-ScheduledTaskSettingsSet `
     -AllowStartIfOnBatteries `
     -DontStopIfGoingOnBatteries `
-    -StartWhenAvailable `
+    -RunOnlyIfIdle `
+    -IdleDuration (New-TimeSpan -Minutes $idleMinutes) `
     -MultipleInstances IgnoreNew `
     -RestartCount 3 `
     -RestartInterval (
@@ -401,7 +365,7 @@ Register-ScheduledTask `
     -Principal $principal `
     -Settings $settings `
     -Description `
-        "Automatically runs the Worklog Outlook ICS importer."
+        "Automatically runs the Worklog Outlook ICS importer when idle."
 
 
 # ============================================================
@@ -424,8 +388,8 @@ Write-Host "  $scriptPath"
 
 Write-Host ""
 
-Write-Host "Schedule:"
-Write-Host "  Every $intervalMinutes minute(s) (with lock catch-up)"
+Write-Host "Condition:"
+Write-Host "  Runs after $idleMinutes minute(s) of system idle time"
 
 Write-Host ""
 
@@ -434,13 +398,13 @@ Write-Host "  Hidden"
 
 Write-Host ""
 
-Write-Host "First scheduled run:"
+Write-Host "First check starts:"
 Write-Host "  Approximately $startTime"
 
 Write-Host ""
 
 Write-Host "Run mode:"
-Write-Host "  Only while you are logged in"
+Write-Host "  Only while you are logged in and idle"
 
 Write-Host ""
 
@@ -483,10 +447,6 @@ if (
     Write-Host ""
     Write-Host "Because PowerShell is configured as hidden,"
     Write-Host "no PowerShell window should appear."
-
-    Write-Host ""
-    Write-Host "You can check Task Scheduler to verify"
-    Write-Host "the Last Run Result if necessary."
 }
 
 
