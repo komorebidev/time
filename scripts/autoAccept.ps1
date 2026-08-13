@@ -304,14 +304,16 @@ try {
                 $existingEnd = [datetime]$existing.End
                 $targetBusyStatus = if ($summary -eq "Out of Office") { 3 } else { 2 }
 
-                $hasChanges = (
-                    $existing.Subject -ne $summary -or
-                    $existingStart -ne $start -or
-                    $existingEnd -ne $end -or
-                    $normExistingBody -ne $normNewBody -or
-                    $normExistingLoc -ne $normNewLoc -or
-                    $existing.BusyStatus -ne $targetBusyStatus
-                )
+                # Build a detailed list of what differs for debugging/reporting
+                $changeReasons = @()
+                if ($existing.Subject -ne $summary) { $changeReasons += "Subject" }
+                if ($existingStart.Date -ne $start.Date) { $changeReasons += "Start Date" }
+                if ($existingEnd.Date -ne $end.Date) { $changeReasons += "End Date" }
+                if ($normExistingBody -ne $normNewBody) { $changeReasons += "Body" }
+                if ($normExistingLoc -ne $normNewLoc) { $changeReasons += "Location" }
+                if ($existing.BusyStatus -ne $targetBusyStatus) { $changeReasons += "BusyStatus" }
+
+                $hasChanges = ($changeReasons.Count -gt 0)
 
                 if ($hasChanges) {
                     $existing.Subject = $summary
@@ -332,7 +334,7 @@ try {
                     if ($uidProperty) { [Runtime.InteropServices.Marshal]::ReleaseComObject($uidProperty) | Out-Null }
                     [Runtime.InteropServices.Marshal]::ReleaseComObject($existing) | Out-Null
 
-                    Write-Host " [UPDATED]" -ForegroundColor Cyan
+                    Write-Host " [UPDATED: $($changeReasons -join ', ')]" -ForegroundColor Cyan
                     $updatedCount++
                 }
                 else {
