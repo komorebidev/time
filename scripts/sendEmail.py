@@ -102,7 +102,6 @@ def find_markdown_files(path, full_refresh=False):
 
 def parse_checklist_log(file_content):
 
-    # Updated pattern to match heading-based dates: ## **YYYY-MM-DD (Day)**: ...
     pattern = (
         r'##\s*'
         r'(\*\*\d{4}-\d{2}-\d{2}\s*\([^)]+\)\*\*.*?)'
@@ -232,15 +231,8 @@ def is_public_holiday(entry):
 
 def is_out_of_office(entry):
 
-    text = (
-
-        entry.get("title", "")
-
-        + " "
-
-        + entry.get("content", "")
-
-    )
+    title = entry.get("title", "")
+    text = title + " " + entry.get("content", "")
 
     patterns = [
 
@@ -277,7 +269,8 @@ def is_out_of_office(entry):
         for pattern in patterns
     )
 
-    match_capitalized_off = re.search(r"\bOff\b", text) is not None
+    # Catches off, Off, or OFF strictly if it appears in the header (title) line
+    match_header_off = re.search(r"\boff\b", title, re.IGNORECASE) is not None
 
     return (
 
@@ -285,7 +278,7 @@ def is_out_of_office(entry):
 
         or match_general
 
-        or match_capitalized_off
+        or match_header_off
 
     )
 
