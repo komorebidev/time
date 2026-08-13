@@ -258,6 +258,15 @@ try {
             $summary = Unescape-IcsText($properties["SUMMARY"])
             $description = Unescape-IcsText($properties["DESCRIPTION"])
             $location = Unescape-IcsText($properties["LOCATION"])
+            $transp = $properties["TRANSP"]
+
+            # Determine BusyStatus: Out of Office = 3, Transparent (Free) = 0, Regular Busy = 2
+            $targetBusyStatus = 2
+            if ($summary -eq "Out of Office") {
+                $targetBusyStatus = 3
+            } elseif ($transp -eq "TRANSPARENT") {
+                $targetBusyStatus = 0
+            }
 
             try {
                 $start = Parse-IcsDate($properties["DTSTART"])
@@ -281,7 +290,7 @@ try {
                 $appointment.AllDayEvent = $true
                 $appointment.Body = $description
                 $appointment.Location = $location
-                $appointment.BusyStatus = if ($summary -eq "Out of Office") { 3 } else { 2 }
+                $appointment.BusyStatus = $targetBusyStatus
 
                 $uidProperty = $appointment.UserProperties.Add("WorklogUID", 1, $false)
                 $uidProperty.Value = $uid
@@ -302,7 +311,6 @@ try {
 
                 $existingStart = [datetime]$existing.Start
                 $existingEnd = [datetime]$existing.End
-                $targetBusyStatus = if ($summary -eq "Out of Office") { 3 } else { 2 }
 
                 # Build a detailed list of what differs for debugging/reporting
                 $changeReasons = @()
