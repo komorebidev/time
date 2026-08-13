@@ -103,9 +103,9 @@ def find_markdown_files(path, full_refresh=False):
 def parse_checklist_log(file_content):
 
     pattern = (
-        r'-\s*\[([ xX])\]\s*'
+        r'-\s*\[[ xX]?\]\s*'
         r'\*\*(\d{4}-\d{2}-\d{2}\s*\([^)]+\))\*\*'
-        r'(.*?)(?=\n\s*-\s*\[[ xX]\]\s*\*\*\d{4}-\d{2}-\d{2}|\Z)'
+        r'(.*?)(?=\n\s*-\s*\[[ xX]?\]\s*\*\*\d{4}-\d{2}-\d{2}|\Z)'
     )
 
     matches = re.findall(
@@ -116,7 +116,7 @@ def parse_checklist_log(file_content):
 
     entries = []
 
-    for status, date_str, content in matches:
+    for date_str, content in matches:
 
         raw_content = content.strip()
 
@@ -163,10 +163,6 @@ def parse_checklist_log(file_content):
                     cleaned_content
                     if cleaned_content
                     else title
-                ),
-
-                "completed": (
-                    status.upper() == "X"
                 )
             }
         )
@@ -284,7 +280,6 @@ def is_out_of_office(entry):
         for pattern in patterns
     )
 
-    # Strictly matches capitalized "Off", but ignores "off" and "OFF"
     match_capitalized_off = re.search(r"\bOff\b", text) is not None
 
     return (
