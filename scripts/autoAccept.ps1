@@ -31,7 +31,7 @@ function Connect-Outlook {
             if ($null -eq $outlook) {
                 throw "No active instance found."
             }
-            Write-Host "Connected to active Outlook instance"
+            Write-Host "✓ Connected to active Outlook instance"
             break
         }
         catch {
@@ -39,7 +39,7 @@ function Connect-Outlook {
                 $outlookType = [Type]::GetTypeFromProgID("Outlook.Application")
                 $outlook = [Activator]::CreateInstance($outlookType)
                 $script:StartedOutlookByScript = $true
-                Write-Host "Created background Outlook COM instance"
+                Write-Host "✓ Created background Outlook COM instance"
                 break
             }
             catch {
@@ -294,6 +294,13 @@ try {
                 $createdCount++
             }
             else {
+                # Normalize values to prevent false positives from null/empty mismatches or line endings
+                $normExistingBody = if ($null -eq $existing.Body) { "" } else { "$($existing.Body)".Replace("`r`n", "`n").Trim() }
+                $normNewBody = if ($null -eq $description) { "" } else { "$description".Replace("`r`n", "`n").Trim() }
+
+                $normExistingLoc = if ($null -eq $existing.Location) { "" } else { "$($existing.Location)".Trim() }
+                $normNewLoc = if ($null -eq $location) { "" } else { "$location".Trim() }
+
                 $existingStart = [datetime]$existing.Start
                 $existingEnd = [datetime]$existing.End
                 $targetBusyStatus = if ($summary -eq "Out of Office") { 3 } else { 2 }
@@ -302,8 +309,8 @@ try {
                     $existing.Subject -ne $summary -or
                     $existingStart -ne $start -or
                     $existingEnd -ne $end -or
-                    $existing.Body -ne $description -or
-                    $existing.Location -ne $location -or
+                    $normExistingBody -ne $normNewBody -or
+                    $normExistingLoc -ne $normNewLoc -or
                     $existing.BusyStatus -ne $targetBusyStatus
                 )
 
@@ -348,7 +355,7 @@ try {
             $itemToDelete = $namespace.GetItemFromID($targetMailEntryId)
             $itemToDelete.Delete()
             [Runtime.InteropServices.Marshal]::ReleaseComObject($itemToDelete) | Out-Null
-            Write-Host "Email successfully deleted."
+            Write-Host "✓ Email successfully deleted."
         }
         catch {
             Write-Host "Warning: Deletion encountered issue: $_"
