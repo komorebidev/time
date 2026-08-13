@@ -9,11 +9,10 @@ Push work logs to calendar as ics invites using Azure resources to send the emai
 * Does not create duplicate events
 * If keywords like "Day off" are detected, it sets the day as out of office
 * Office location support (if wfh or remote is detected for that day)
-* Update all calendar entries logic when making script changes
+* Update all calendar entries logic when running manual workflow action
 * Generates a static ics hosted on Github pages (docs folder) that can be subscribed to by iCloud (showing day offs, etc. only)
-* Automatic acceptance of the ics file in corporate mailbox
-* Marks processed ICS emails
-* Deletes ics emails after import
+* Automatic acceptance of the ics file in corporate mailbox (autoAccept.ps1, COM script)
+* Deletes ics emails after import(buggy)
 
 ## iCloud Calendar subscription URL 
 
@@ -27,6 +26,7 @@ Push work logs to calendar as ics invites using Azure resources to send the emai
 * Needs configured Outlook desktop
 * Run setuptimeTask.ps1 with the script path as pointing to autoAccept.ps1
 * That sets up scheduled task
+* Responsible for what events look like after they are imported (the Github action generates the ics file from sendEmail.py but importing is autoAccept.ps1)
 
 ## Manually starting the scheduled task
 
