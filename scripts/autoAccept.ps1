@@ -166,6 +166,7 @@ $namespace = $null
 $inbox = $null
 $calendar = $null
 $targetMail = $null
+$targetMailEntryId = $null
 $icsAttachment = $null
 $createdCount = 0
 $updatedCount = 0
@@ -210,6 +211,7 @@ try {
 
             if ($hasTargetAttachment) {
                 $targetMail = $mail
+                $targetMailEntryId = $targetMail.EntryID
                 break
             }
         }
@@ -335,12 +337,18 @@ try {
             }
         }
 
-        # DELETE PROCESSED EMAIL DIRECTLY
+        # DELETE PROCESSED EMAIL DIRECTLY USING FRESH ENTRY ID REFERENCE
         Write-Host ""
         Write-Host "Deleting processed email..."
         try {
-            $targetMail.Delete()
-            Write-Host "Email successfully deleted."
+            if ($targetMail) {
+                [Runtime.InteropServices.Marshal]::ReleaseComObject($targetMail) | Out-Null
+                $targetMail = $null
+            }
+            $itemToDelete = $namespace.GetItemFromID($targetMailEntryId)
+            $itemToDelete.Delete()
+            [Runtime.InteropServices.Marshal]::ReleaseComObject($itemToDelete) | Out-Null
+            Write-Host "✓ Email successfully deleted."
         }
         catch {
             Write-Host "Warning: Deletion encountered issue: $_"
