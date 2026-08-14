@@ -45,21 +45,21 @@ def run_cli(args):
     """
     Run playwright-cli safely on Windows.
 
-    playwright-cli is installed as a .cmd file through npm,
-    so URLs containing '&' need to be protected from cmd.exe.
+    Handles:
+      - npm's .cmd launcher
+      - URLs containing &
+      - UTF-8 Playwright output
     """
 
     args = [str(arg) for arg in args]
 
-    # Windows .cmd files need cmd.exe.
-    if sys.platform == "win32" and PLAYWRIGHT_CLI.lower().endswith(".cmd"):
-
-        # Quote every argument so cmd.exe doesn't interpret
-        # characters such as &, |, <, >, etc.
+    if (
+        sys.platform == "win32"
+        and PLAYWRIGHT_CLI.lower().endswith(".cmd")
+    ):
         quoted_args = []
 
         for arg in args:
-            # Escape embedded double quotes for Windows command-line parsing.
             escaped = arg.replace('"', '\\"')
             quoted_args.append(f'"{escaped}"')
 
@@ -72,6 +72,8 @@ def run_cli(args):
             command,
             shell=True,
             text=True,
+            encoding="utf-8",
+            errors="replace",
             capture_output=True,
         )
 
@@ -79,6 +81,8 @@ def run_cli(args):
         result = subprocess.run(
             [PLAYWRIGHT_CLI, *args],
             text=True,
+            encoding="utf-8",
+            errors="replace",
             capture_output=True,
         )
 
