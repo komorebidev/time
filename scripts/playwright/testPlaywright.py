@@ -36,7 +36,6 @@ def find_playwright_cli():
     if cli:
         return cli
 
-    # Fallback for Windows npm global installs
     appdata = os.environ.get("APPDATA")
 
     if appdata:
@@ -51,8 +50,9 @@ def find_playwright_cli():
                 return candidate
 
     raise FileNotFoundError(
-        "Could not find playwright-cli. "
-        "Make sure it is installed and available on PATH."
+        "Could not find playwright-cli.\n"
+        "Run:\n"
+        "python -c \"import shutil; print(shutil.which('playwright-cli'))\""
     )
 
 
@@ -65,24 +65,39 @@ PLAYWRIGHT_CLI = find_playwright_cli()
 
 def pw(*args, check=True):
     """
-    Run a playwright-cli command.
+    Run playwright-cli through cmd.exe.
 
-    UTF-8 decoding is forced because Windows may otherwise try
-    to decode Playwright's output using the system code page.
+    This is important on Windows because playwright-cli is
+    installed as a .cmd file and URLs contain '&'.
     """
 
-    command = [
-        PLAYWRIGHT_CLI,
-        f"--s={SESSION}",
-        *args,
-    ]
+    formatted_args = []
+
+    for arg in args:
+        # Quote arguments containing spaces or shell-sensitive
+        # characters.
+        if any(c in arg for c in ' &'):
+            escaped = arg.replace('"', '\\"')
+            formatted_args.append(f'"{escaped}"')
+        else:
+            formatted_args.append(arg)
+
+    command = (
+        f'"{PLAYWRIGHT_CLI}" '
+        f'--s={SESSION} '
+        f'{" ".join(formatted_args)}'
+    )
+
+    print(f"> {command}")
 
     result = subprocess.run(
-        command,
-        capture_output=True,
+        ["cmd.exe", "/d", "/c", command],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
         text=True,
         encoding="utf-8",
         errors="replace",
+        shell=False,
     )
 
     if result.stdout:
@@ -94,32 +109,35 @@ def pw(*args, check=True):
     if check and result.returncode != 0:
         raise RuntimeError(
             "Playwright CLI command failed:\n"
-            + " ".join(command)
-            + f"\n\nExit code: {result.returncode}"
+            f"{command}\n\n"
+            f"Exit code: {result.returncode}"
         )
 
     return result
 
 
 # ============================================================
-# Attach to Edge
+# Attach to Microsoft Edge
 # ============================================================
 
 def attach():
     print("Attaching to Microsoft Edge...")
 
-    # The CLI creates the "halo" session.
+    command = (
+        f'"{PLAYWRIGHT_CLI}" '
+        f'attach '
+        f'--extension=msedge '
+        f'--session={SESSION}'
+    )
+
     result = subprocess.run(
-        [
-            PLAYWRIGHT_CLI,
-            "attach",
-            "--extension=msedge",
-            f"--session={SESSION}",
-        ],
-        capture_output=True,
+        ["cmd.exe", "/d", "/c", command],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
         text=True,
         encoding="utf-8",
         errors="replace",
+        shell=False,
     )
 
     if result.stdout:
@@ -130,31 +148,32 @@ def attach():
 
     if result.returncode != 0:
         raise RuntimeError(
-            "Could not attach to Microsoft Edge.\n"
-            + (result.stderr or result.stdout)
+            "Could not attach to Microsoft Edge.\n\n"
+            f"{result.stdout}\n"
+            f"{result.stderr}"
         )
 
-    # Give the CLI session a moment to finish attaching.
     time.sleep(1)
 
 
 # ============================================================
-# Main automation
+# Main
 # ============================================================
 
 def main():
 
+    print()
     print(f"Using playwright-cli: {PLAYWRIGHT_CLI}")
     print()
 
     # --------------------------------------------------------
-    # Attach to the already-open Edge session
+    # Attach to Edge
     # --------------------------------------------------------
 
     attach()
 
     # --------------------------------------------------------
-    # Ask for ticket
+    # Ticket number
     # --------------------------------------------------------
 
     ticket = input("Ticket number: ").strip()
@@ -166,7 +185,7 @@ def main():
     url = f"{BASE_URL}?id={ticket}&showalltickettypes=1"
 
     # --------------------------------------------------------
-    # Navigate
+    # Open ticket
     # --------------------------------------------------------
 
     print()
@@ -175,11 +194,11 @@ def main():
     pw("goto", url)
 
     # --------------------------------------------------------
-    # Snapshot before Worklog
+    # Snapshot ticket
     # --------------------------------------------------------
 
     print()
-    print("Taking snapshot...")
+    print("Taking ticket snapshot...")
 
     pw("snapshot")
 
@@ -195,7 +214,6 @@ def main():
         "getByRole('button', { name: 'Worklog' })"
     )
 
-    # Give HaloPSA a moment to render the Worklog form.
     time.sleep(1)
 
     # --------------------------------------------------------
@@ -203,12 +221,12 @@ def main():
     # --------------------------------------------------------
 
     print()
-    print("Reading Worklog form...")
+    print("Taking Worklog snapshot...")
 
     pw("snapshot")
 
     # --------------------------------------------------------
-    # Enter Worklog text
+    # Worklog text
     # --------------------------------------------------------
 
     print()
@@ -221,7 +239,7 @@ def main():
     )
 
     # --------------------------------------------------------
-    # Set Status
+    # Status
     # --------------------------------------------------------
 
     print()
@@ -234,7 +252,7 @@ def main():
     )
 
     # --------------------------------------------------------
-    # Set Job Start
+    # Start time
     # --------------------------------------------------------
 
     print()
@@ -247,7 +265,7 @@ def main():
     )
 
     # --------------------------------------------------------
-    # Set Job End
+    # End time
     # --------------------------------------------------------
 
     print()
@@ -260,7 +278,7 @@ def main():
     )
 
     # --------------------------------------------------------
-    # Set Charge Type
+    # Charge type
     # --------------------------------------------------------
 
     print()
@@ -273,7 +291,7 @@ def main():
     )
 
     # --------------------------------------------------------
-    # Final snapshot before saving
+    # Final snapshot
     # --------------------------------------------------------
 
     print()
@@ -293,19 +311,21 @@ def main():
         "getByRole('button', { name: 'Save' })",
     )
 
-    # --------------------------------------------------------
-    # Verify resulting page
-    # --------------------------------------------------------
-
     time.sleep(1)
 
+    # --------------------------------------------------------
+    # Verify
+    # --------------------------------------------------------
+
     print()
-    print("Final page state:")
+    print("Verifying result...")
 
     pw("snapshot")
 
     print()
+    print("========================================")
     print("Worklog automation complete.")
+    print("========================================")
 
 
 # ============================================================
@@ -317,7 +337,8 @@ if __name__ == "__main__":
         main()
 
     except KeyboardInterrupt:
-        print("\nCancelled.")
+        print()
+        print("Cancelled.")
 
     except Exception as e:
         print()
