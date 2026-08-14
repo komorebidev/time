@@ -145,7 +145,7 @@ def goto_ticket(ticket):
 def scrape_ticket_options():
     """
     Intelligently parse ticket IDs, titles, dates, and types from the 
-    playwright-cli snapshot output using block-context tracking.
+    playwright-cli snapshot output using strict noise and duration filtering.
     """
     print("\nTaking snapshot to extract tickets and metadata...")
     output = run_cli("snapshot", check=True)
@@ -163,22 +163,48 @@ def scrape_ticket_options():
         date_str = ""
         ticket_type = ""
         
+        candidate_titles = []
+        
         for line in block_lines:
+            # Extract date
             if re.search(r'\d{1,2}/\d{1,2}/\d{4}\s+\d{2}:\d{2}', line):
                 date_match = re.search(r'([\d/]+\s+[\d:]+)', line)
                 if date_match:
                     date_str = date_match.group(1)
+            
+            # Extract ticket type
             elif any(t in line for t in ["Service Request", "Incident", "Project Support"]):
                 for t in ["Service Request", "Incident", "Project Support"]:
                     if t in line:
                         ticket_type = t
                         break
-            elif any(marker in line for marker in [': "', ': "00', 'checkbox', 'EIRE Systems/', 'On Hold', 'Low', 'Medium', 'High', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December']):
+            
+            # Filter out UI elements, timestamps, durations (e.g., 56:30), statuses, priorities, and names
+            elif any(marker in line.lower() for marker in [
+                'cursor=pointer', 'checkbox', 'bulk select', 'eire systems/', 
+                'on hold', 'completed', 'low', 'medium', 'high', 'march', 'april', 
+                'may', 'june', 'july', 'august', 'september', 'october', 'november', 'december'
+            ]):
                 continue
+            elif re.search(r'^\s*-\s*(generic|text):\s*\d+:\d+\s*$', line):
+                continue # Skip pure duration lines like "56:30"
             else:
-                clean_line = re.sub(r'^\s*-\s*(generic|text):\s*', '', line).strip('" ')
-                if len(clean_line) > 5 and not clean_line.startswith('e'):
-                    title = clean_line
+                # Clean line text
+                clean_line = re.sub(r'^\s*-\s*(generic|text)(\s*"[^"]*")?:\s*', '', line).strip('" ')
+                clean_line = re.sub(r'\[ref=e\d+\]', '', clean_line).strip()
+                
+                # Exclude durations, ticket types, IDs, dates, and short tags from being considered titles
+                if (len(clean_line) > 5 and 
+                    not re.match(r'^00\d{5}$', clean_line) and 
+                    not re.match(r'^\d+:\d+$', clean_line) and
+                    not re.match(r'^\d{1,2}/\d{1,2}/\d{4}', clean_line) and
+                    clean_line not in ["Service Request", "Incident", "Project Support"]):
+                    candidate_titles.append(clean_line)
+
+        # Pick the most descriptive candidate as the title
+        if candidate_titles:
+            candidate_titles.sort(key=len, reverse=True)
+            title = candidate_titles[0]
 
         tickets.append({
             "id": ticket_id,
@@ -199,7 +225,7 @@ def scrape_ticket_options():
             block_buffer = []
         elif active_id:
             block_buffer.append(line)
-            if "cursor=pointer" in line and len(block_buffer) > 3:
+            if "cursor=pointer" in line and len(block_buffer) > 4:
                 process_block(active_id, block_buffer)
                 active_id = None
                 block_buffer = []
@@ -412,7 +438,7 @@ def main():
                 for idx, t in enumerate(tickets, 1):
                     date_info = f" [{t['date']}]" if t['date'] else ""
                     type_info = f" ({t['type']})" if t['type'] else ""
-                    print(f"  [{idx}] {t['id']}{date_info}{type_info} - {t['title'][:50]}")
+                    print(f"  [{idx}] {t['id']}{date_info}{type_info} - {t['title']}")
                 
                 sel = input("\nEnter selection number or type a Ticket ID directly: ").strip()
                 if sel.isdigit() and 1 <= int(sel) <= len(tickets):
