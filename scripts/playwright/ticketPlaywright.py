@@ -143,24 +143,24 @@ def goto_ticket(ticket):
 
 def scrape_ticket_options():
     """
-    Scrape ticket IDs and titles from the current HaloPSA tickets view page.
+    Scrape ticket IDs and titles directly from the live DOM text nodes of the current page.
     """
     print("\nScraping tickets from current page...")
     
     js_code = textwrap.dedent(
         """
         async page => {
-            const rows = await page.locator('div[role="row"], tr, [ref]').evaluateAll(elements => {
+            const tickets = await page.evaluate(() => {
                 const results = [];
                 const seenIds = new Set();
-
-                elements.forEach(el => {
+                
+                const allElements = document.querySelectorAll('div, span, a');
+                allElements.forEach(el => {
                     const text = el.innerText || "";
-                    // Look for 7-digit ticket numbers starting with 00 (e.g., 0026229)
                     const match = text.match(/\\b(00\\d{5})\\b/);
                     if (match) {
                         const ticketId = match[1];
-                        if (!seenIds.has(ticketId)) {
+                        if (!seenIds.has(ticketId) && text.length < 300) {
                             seenIds.add(ticketId);
                             const cleanText = text.replace(/\\n/g, ' | ').trim();
                             results.push({
@@ -173,7 +173,7 @@ def scrape_ticket_options():
                 return results;
             });
 
-            console.log(JSON.stringify(rows, null, 2));
+            console.log(JSON.stringify(tickets, null, 2));
         }
         """
     )
