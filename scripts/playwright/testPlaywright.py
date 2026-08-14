@@ -50,9 +50,7 @@ def find_playwright_cli():
                 return candidate
 
     raise FileNotFoundError(
-        "Could not find playwright-cli.\n"
-        "Run:\n"
-        "python -c \"import shutil; print(shutil.which('playwright-cli'))\""
+        "Could not find playwright-cli."
     )
 
 
@@ -65,33 +63,29 @@ PLAYWRIGHT_CLI = find_playwright_cli()
 
 def pw(*args, check=True):
     """
-    Run playwright-cli through cmd.exe.
+    Run playwright-cli directly.
 
-    This is important on Windows because playwright-cli is
-    installed as a .cmd file and URLs contain '&'.
+    subprocess.run() passes each argument separately, so URLs
+    containing '&' do not need shell escaping.
     """
 
-    formatted_args = []
+    command = [
+        PLAYWRIGHT_CLI,
+        f"--s={SESSION}",
+        *args,
+    ]
 
-    for arg in args:
-        # Quote arguments containing spaces or shell-sensitive
-        # characters.
-        if any(c in arg for c in ' &'):
-            escaped = arg.replace('"', '\\"')
-            formatted_args.append(f'"{escaped}"')
-        else:
-            formatted_args.append(arg)
-
-    command = (
-        f'"{PLAYWRIGHT_CLI}" '
-        f'--s={SESSION} '
-        f'{" ".join(formatted_args)}'
+    print(
+        ">",
+        " ".join(
+            f'"{arg}"' if any(c in arg for c in " &")
+            else arg
+            for arg in command
+        )
     )
 
-    print(f"> {command}")
-
     result = subprocess.run(
-        ["cmd.exe", "/d", "/c", command],
+        command,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         text=True,
@@ -109,8 +103,8 @@ def pw(*args, check=True):
     if check and result.returncode != 0:
         raise RuntimeError(
             "Playwright CLI command failed:\n"
-            f"{command}\n\n"
-            f"Exit code: {result.returncode}"
+            + " ".join(command)
+            + f"\n\nExit code: {result.returncode}"
         )
 
     return result
@@ -123,15 +117,15 @@ def pw(*args, check=True):
 def attach():
     print("Attaching to Microsoft Edge...")
 
-    command = (
-        f'"{PLAYWRIGHT_CLI}" '
-        f'attach '
-        f'--extension=msedge '
-        f'--session={SESSION}'
-    )
+    command = [
+        PLAYWRIGHT_CLI,
+        "attach",
+        "--extension=msedge",
+        f"--session={SESSION}",
+    ]
 
     result = subprocess.run(
-        ["cmd.exe", "/d", "/c", command],
+        command,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         text=True,
@@ -149,8 +143,9 @@ def attach():
     if result.returncode != 0:
         raise RuntimeError(
             "Could not attach to Microsoft Edge.\n\n"
-            f"{result.stdout}\n"
-            f"{result.stderr}"
+            + result.stdout
+            + "\n"
+            + result.stderr
         )
 
     time.sleep(1)
@@ -167,13 +162,13 @@ def main():
     print()
 
     # --------------------------------------------------------
-    # Attach to Edge
+    # Attach to existing Edge
     # --------------------------------------------------------
 
     attach()
 
     # --------------------------------------------------------
-    # Ticket number
+    # Ask for ticket
     # --------------------------------------------------------
 
     ticket = input("Ticket number: ").strip()
@@ -194,7 +189,7 @@ def main():
     pw("goto", url)
 
     # --------------------------------------------------------
-    # Snapshot ticket
+    # Snapshot
     # --------------------------------------------------------
 
     print()
@@ -217,7 +212,7 @@ def main():
     time.sleep(1)
 
     # --------------------------------------------------------
-    # Snapshot Worklog form
+    # Snapshot Worklog
     # --------------------------------------------------------
 
     print()
@@ -226,7 +221,7 @@ def main():
     pw("snapshot")
 
     # --------------------------------------------------------
-    # Worklog text
+    # Enter Worklog
     # --------------------------------------------------------
 
     print()
@@ -239,7 +234,7 @@ def main():
     )
 
     # --------------------------------------------------------
-    # Status
+    # Set Status
     # --------------------------------------------------------
 
     print()
@@ -252,7 +247,7 @@ def main():
     )
 
     # --------------------------------------------------------
-    # Start time
+    # Set Start Time
     # --------------------------------------------------------
 
     print()
@@ -265,7 +260,7 @@ def main():
     )
 
     # --------------------------------------------------------
-    # End time
+    # Set End Time
     # --------------------------------------------------------
 
     print()
@@ -278,7 +273,7 @@ def main():
     )
 
     # --------------------------------------------------------
-    # Charge type
+    # Set Charge Type
     # --------------------------------------------------------
 
     print()
