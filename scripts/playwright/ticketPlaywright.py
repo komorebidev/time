@@ -141,6 +141,70 @@ def goto_ticket(ticket):
     time.sleep(1)
 
 
+def scrape_ticket_options():
+    """
+    Scrape ticket IDs and titles from the current HaloPSA tickets view page.
+    """
+    print("\nScraping tickets from current page...")
+    
+    js_code = textwrap.dedent(
+        """
+        async page => {
+            const rows = await page.locator('div[role="row"], tr, [ref]').evaluateAll(elements => {
+                const results = [];
+                const seenIds = new Set();
+
+                elements.forEach(el => {
+                    const text = el.innerText || "";
+                    // Look for 7-digit ticket numbers starting with 00 (e.g., 0026229)
+                    const match = text.match(/\\b(00\\d{5})\\b/);
+                    if (match) {
+                        const ticketId = match[1];
+                        if (!seenIds.has(ticketId)) {
+                            seenIds.add(ticketId);
+                            const cleanText = text.replace(/\\n/g, ' | ').trim();
+                            results.push({
+                                id: ticketId,
+                                title: cleanText.substring(0, 100)
+                            });
+                        }
+                    }
+                });
+                return results;
+            });
+
+            console.log(JSON.stringify(rows, null, 2));
+        }
+        """
+    )
+
+    temp_path = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            mode="w", suffix=".js", prefix="halo_scrape_", delete=False, encoding="utf-8"
+        ) as temp_file:
+            temp_file.write(js_code)
+            temp_path = temp_file.name
+
+        output = run_cli("run-code", f"--filename={temp_path}")
+        
+        for line in output.splitlines():
+            line_str = line.strip()
+            if line_str.startswith("[") or line_str.startswith("{"):
+                try:
+                    tickets = json.loads(line_str)
+                    return tickets
+                except json.JSONDecodeError:
+                    pass
+        return []
+    finally:
+        if temp_path and os.path.exists(temp_path):
+            try:
+                os.remove(temp_path)
+            except OSError:
+                pass
+
+
 def run_halo_automation(worklog_text, status, start_time, end_time, charge_type):
     """
     Run the actual HaloPSA Worklog automation using Playwright code.
@@ -330,7 +394,29 @@ def main():
         attach()
 
         ticket = ""
-        while not ticket:
+        choice = input(
+            "\n[1] Enter Ticket ID manually\n"
+            "[2] Scrape Ticket IDs from current Edge page view\n"
+            "Select option [1/2]: "
+        ).strip()
+
+        if choice == "2":
+            tickets = scrape_ticket_options()
+            if tickets:
+                print(f"\nFound {len(tickets)} tickets on the current page:")
+                for idx, t in enumerate(tickets[:15], 1):
+                    print(f"  [{idx}] ID: {t['id']} - {t['title'][:60]}...")
+                
+                sel = input("\nEnter selection number or type a Ticket ID directly: ").strip()
+                if sel.isdigit() and 1 <= int(sel) <= len(tickets):
+                    ticket = tickets[int(sel) - 1]["id"]
+                    print(f"Selected Ticket ID: {ticket}")
+                else:
+                    ticket = sel
+            else:
+                print("No tickets could be automatically scraped from this page.")
+
+        while not ticket or not ticket.isdigit():
             ticket = input("\nEnter Ticket Number: ").strip()
             if not ticket or not ticket.isdigit():
                 print("Please enter a valid numeric ticket number.")
