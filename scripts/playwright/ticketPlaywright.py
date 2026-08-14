@@ -145,7 +145,7 @@ def goto_ticket(ticket):
 def scrape_ticket_options():
     """
     Intelligently parse ticket IDs, titles, dates, and types from the 
-    playwright-cli snapshot output, thoroughly stripping UI noise and 'generic' tags.
+    playwright-cli snapshot output, ignoring assignee paths and user names.
     """
     print("\nTaking snapshot to extract tickets and metadata...")
     output = run_cli("snapshot", check=True)
@@ -185,9 +185,7 @@ def scrape_ticket_options():
                 continue
 
             # Clean line text thoroughly
-            # 1. Strip ref tags first
             clean_line = re.sub(r'\[ref=e\d+\]', '', line)
-            # 2. Strip leading bullets, 'generic', 'text', quotes, and colons
             clean_line = re.sub(r'^\s*-\s*(?:generic|text)?\s*(?:"[^"]*")?\s*:\s*', '', clean_line)
             clean_line = re.sub(r'^\s*-\s*(?:generic|text)\b', '', clean_line)
             clean_line = clean_line.strip('" :')
@@ -203,7 +201,8 @@ def scrape_ticket_options():
                 continue
             if re.search(r'\d{1,2}/\d{1,2}/\d{4}', clean_line):
                 continue
-            if 'eire systems/' in lower_line or (len(clean_line) <= 3 and clean_line.isupper()):
+            # Filter out assignee user names, initials, and company paths like "Polaris Holdings Co., Ltd./Main Site/Masanobu Mochiki"
+            if 'eire systems/' in lower_line or '/' in clean_line or (len(clean_line) <= 3 and clean_line.isupper()):
                 continue
 
             candidate_titles.append(clean_line)
