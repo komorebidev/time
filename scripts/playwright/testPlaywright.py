@@ -3,6 +3,7 @@ import json
 import os
 import platform
 import shutil
+import stat
 import subprocess
 import sys
 import tempfile
@@ -84,6 +85,14 @@ def run_cli(*args, check=True):
     return result.stdout
 
 
+def remove_readonly(func, path, excinfo):
+    """
+    Error handler for shutil.rmtree to clear read-only bits and retry on Windows.
+    """
+    os.chmod(path, stat.S_IWRITE)
+    func(path)
+
+
 def cleanup_local_artifacts():
     """
     Remove local .playwright or session folders created in the working directory.
@@ -93,10 +102,11 @@ def cleanup_local_artifacts():
     for folder in folders_to_remove:
         if os.path.exists(folder) and os.path.isdir(folder):
             try:
-                shutil.rmtree(folder)
+                # Close any open file handles to log files first if tracked
+                shutil.rmtree(folder, onerror=remove_readonly)
                 print(f"Cleaned up local folder: {folder}")
-            except OSError:
-                pass
+            except Exception as e:
+                print(f"Note: Could not fully remove folder {folder}: {e}")
 
 
 def attach():
@@ -157,8 +167,11 @@ def get_ticket_number():
                     const match = href.match(/id=(\\d+)/);
                     if (match) {
                         const id = match[1];
-                        const title = link.innerText.trim();
-                        if (!results.some(r => r.id === id) && title) {
+                        let title = link.innerText.trim();
+                        if (!title) {
+                            title = link.getAttribute('aria-label') || link.title || ("Ticket #" + id);
+                        }
+                        if (!results.some(r => r.id === id)) {
                             results.push({ id: id, title: title });
                         }
                     }
@@ -181,7 +194,6 @@ def get_ticket_number():
 
         run_cli("run-code", f"--filename={temp_path}")
         
-        # Read the console log file where playwright-cli dumped the console output
         console_output = get_latest_console_log()
 
         tickets = []
