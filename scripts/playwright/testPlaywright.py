@@ -1,6 +1,9 @@
+import os
 import shutil
 import subprocess
 import sys
+import tempfile
+import textwrap
 import time
 
 
@@ -20,8 +23,10 @@ START_TIME = "09:00"
 END_TIME = "10:00"
 
 
-def find_cli():
-    """Find playwright-cli without hard-coding the Windows username."""
+def find_playwright_cli():
+    """
+    Find playwright-cli without hard-coding the Windows username.
+    """
 
     cli = shutil.which("playwright-cli")
 
@@ -38,19 +43,16 @@ def find_cli():
     )
 
 
-CLI = find_cli()
+CLI = find_playwright_cli()
 
 
-def pw(*args, check=True):
+def run_cli(*args, check=True):
     """
-    Run:
+    Run playwright-cli.
 
-        playwright-cli --s=halo <command> ...
-
-    directly.
-
-    Using a list of arguments is important because the ticket URL
-    contains '&'.
+    Arguments are passed directly rather than constructing a cmd.exe
+    command string. This prevents '&' in URLs from being interpreted
+    as a command separator.
     """
 
     command = [
@@ -76,23 +78,35 @@ def pw(*args, check=True):
 
     if check and result.returncode != 0:
         raise RuntimeError(
-            f"Playwright CLI command failed:\n"
-            f"{' '.join(command)}\n"
-            f"Exit code: {result.returncode}"
+            "Playwright CLI command failed:\n"
+            + " ".join(command)
+            + f"\nExit code: {result.returncode}"
         )
 
     return result.stdout
 
 
 def attach():
+    """
+    Attach the CLI session to the already-open Microsoft Edge tab
+    through the Playwright browser extension.
+    """
+
     print("Attaching to Microsoft Edge...")
 
-    pw("attach")
+    run_cli(
+        "attach",
+        "--extension=msedge",
+    )
 
     time.sleep(1)
 
 
 def goto_ticket(ticket):
+    """
+    Navigate to the requested Halo ticket.
+    """
+
     url = (
         f"{BASE_URL}"
         f"?id={ticket}"
@@ -101,153 +115,229 @@ def goto_ticket(ticket):
 
     print(f"\nOpening ticket {ticket}...")
 
-    pw("goto", url)
+    run_cli(
+        "goto",
+        url,
+    )
 
     time.sleep(1)
 
 
-def open_worklog():
-    print("\nOpening Worklog...")
-
-    pw("click", "button", "Worklog")
-
-    time.sleep(1)
-
-
-def enter_worklog():
-    print("\nEntering worklog...")
-
-    pw(
-        "fill",
-        '[contenteditable="true"]',
-        WORKLOG_TEXT,
-    )
-
-
-def set_status():
-    print(f"\nSetting status: {STATUS}")
-
-    pw(
-        "click",
-        "combobox",
-        "Status *",
-    )
-
-    time.sleep(0.5)
-
-    pw(
-        "click",
-        "text",
-        STATUS,
-    )
-
-
-def set_times():
+def run_halo_automation():
     """
-    Set the two time fields.
+    Run the actual HaloPSA Worklog automation using Playwright code.
 
-    From the snapshot, the Worklog contains:
-
-        Job Start
-            Date textbox
-            time textbox
-
-        Job End
-            Date textbox
-            time textbox
-
-    The date fields have the accessible name "Date", while the
-    time fields do not.
-
-    Therefore we locate the text inputs and use the two time
-    inputs associated with the Worklog form.
+    Using run-code here means we can use normal Playwright locators
+    instead of relying on generated CLI snapshot references.
     """
 
-    print(f"\nSetting Job Start: {START_TIME}")
-    print(f"Setting Job End:   {END_TIME}")
+    js_code = textwrap.dedent(
+        f"""
+        async page => {{
 
-    # First try the two time inputs using their current values.
-    #
-    # This is intentionally done with JavaScript through the CLI
-    # rather than guessing at generated ref IDs.
+            console.log("Opening Worklog...");
 
-    script = f"""
-    const inputs = [...document.querySelectorAll('input')];
+            await page.getByRole("button", {{
+                name: "Worklog"
+            }}).click();
 
-    const timeInputs = inputs.filter(input => {{
-        const value = input.value || '';
-        const type = (input.type || '').toLowerCase();
-
-        return (
-            type === 'text' &&
-            /^\\d{{1,2}}:\\d{{2}}$/.test(value)
-        );
-    }});
-
-    if (timeInputs.length < 2) {{
-        throw new Error(
-            'Could not find the two Worklog time inputs. Found: '
-            + timeInputs.length
-        );
-    }}
-
-    timeInputs[0].value = '{START_TIME}';
-    timeInputs[0].dispatchEvent(
-        new Event('input', {{ bubbles: true }})
-    );
-    timeInputs[0].dispatchEvent(
-        new Event('change', {{ bubbles: true }})
-    );
-
-    timeInputs[1].value = '{END_TIME}';
-    timeInputs[1].dispatchEvent(
-        new Event('input', {{ bubbles: true }})
-    );
-    timeInputs[1].dispatchEvent(
-        new Event('change', {{ bubbles: true }})
-    );
-    """
-
-    pw("eval", script)
+            await page.waitForTimeout(750);
 
 
-def set_charge_type():
-    print(f"\nSetting charge type: {CHARGE_TYPE}")
+            // ---------------------------------------------------------
+            // WORKLOG TEXT
+            // ---------------------------------------------------------
 
-    pw(
-        "click",
-        "combobox",
-        "Charge Type *",
+            console.log("Entering worklog...");
+
+            const editor = page.locator(
+                '[contenteditable="true"]'
+            ).first();
+
+            await editor.waitFor({
+                state: "visible",
+                timeout: 10000
+            });
+
+            await editor.fill(
+                {WORKLOG_TEXT!r}
+            );
+
+
+            // ---------------------------------------------------------
+            // STATUS
+            // ---------------------------------------------------------
+
+            console.log("Setting status: {STATUS}");
+
+            const status = page.getByRole(
+                "combobox",
+                {{ name: "Status *" }}
+            );
+
+            await status.click();
+
+            await page.getByText(
+                {STATUS!r},
+                {{ exact: true }}
+            ).click();
+
+
+            // ---------------------------------------------------------
+            // JOB START / END TIMES
+            // ---------------------------------------------------------
+
+            console.log(
+                "Setting Job Start: {START_TIME}"
+            );
+
+            console.log(
+                "Setting Job End: {END_TIME}"
+            );
+
+            /*
+             * Halo exposes the two time fields as unnamed text inputs.
+             *
+             * We identify the inputs whose current value looks like
+             * HH:MM, then fill the first two.
+             */
+
+            const timeInputIndexes = await page.locator(
+                "input"
+            ).evaluateAll(inputs => {{
+
+                const result = [];
+
+                inputs.forEach((input, index) => {{
+
+                    const value = input.value || "";
+                    const type = (
+                        input.getAttribute("type") || "text"
+                    ).toLowerCase();
+
+                    if (
+                        (type === "text" || type === "time") &&
+                        /^\\\\d{{1,2}}:\\\\d{{2}}$/.test(value)
+                    ) {{
+                        result.push(index);
+                    }}
+
+                }});
+
+                return result;
+            }});
+
+            console.log(
+                "Time inputs found:",
+                timeInputIndexes
+            );
+
+            if (timeInputIndexes.length < 2) {{
+                throw new Error(
+                    "Could not find the two Halo Worklog time inputs."
+                    + " Found "
+                    + timeInputIndexes.length
+                );
+            }}
+
+            const allInputs = page.locator("input");
+
+            await allInputs
+                .nth(timeInputIndexes[0])
+                .fill("{START_TIME}");
+
+            await allInputs
+                .nth(timeInputIndexes[1])
+                .fill("{END_TIME}");
+
+
+            // ---------------------------------------------------------
+            // CHARGE TYPE
+            // ---------------------------------------------------------
+
+            console.log(
+                "Setting charge type: {CHARGE_TYPE}"
+            );
+
+            const chargeType = page.getByRole(
+                "combobox",
+                {{ name: "Charge Type *" }}
+            );
+
+            await chargeType.click();
+
+            await page.getByText(
+                {CHARGE_TYPE!r},
+                {{ exact: true }}
+            ).click();
+
+
+            // ---------------------------------------------------------
+            // FINAL CHECK
+            // ---------------------------------------------------------
+
+            console.log(
+                "Worklog fields populated. Saving..."
+            );
+
+            await page.waitForTimeout(500);
+
+            await page.getByRole(
+                "button",
+                {{ name: "Save", exact: true }}
+            ).click();
+
+            await page.waitForTimeout(1500);
+
+            console.log("Worklog saved.");
+
+        }}
+        """
     )
 
-    time.sleep(0.5)
+    # run-code accepts a filename. Creating a temporary JS file avoids
+    # Windows quoting problems with the large JavaScript expression.
+    temp_path = None
 
-    pw(
-        "click",
-        "text",
-        CHARGE_TYPE,
-    )
+    try:
+        with tempfile.NamedTemporaryFile(
+            mode="w",
+            suffix=".js",
+            prefix="halo_worklog_",
+            delete=False,
+            encoding="utf-8",
+        ) as temp_file:
+
+            temp_file.write(js_code)
+            temp_path = temp_file.name
+
+        print("\nRunning Halo automation...")
+
+        run_cli(
+            "run-code",
+            f"--filename={temp_path}",
+        )
+
+    finally:
+        if temp_path and os.path.exists(temp_path):
+            try:
+                os.remove(temp_path)
+            except OSError:
+                pass
 
 
 def take_snapshot():
+    """
+    Take a final snapshot so we can verify the result.
+    """
+
     print("\nTaking final snapshot...")
 
-    pw("snapshot")
-
-
-def save():
-    print("\nSaving worklog...")
-
-    pw(
-        "click",
-        "button",
-        "Save",
-    )
-
-    time.sleep(2)
+    run_cli("snapshot")
 
 
 def main():
+    print()
     print("HaloPSA Worklog Automation")
     print("==========================")
 
@@ -258,30 +348,26 @@ def main():
         return
 
     try:
+        # 1. Attach to existing Edge session.
         attach()
 
+        # 2. Navigate to ticket.
         goto_ticket(ticket)
 
-        print("\nTicket opened.")
+        # 3. Perform the complete Worklog automation.
+        run_halo_automation()
 
-        open_worklog()
-
-        enter_worklog()
-
-        set_status()
-
-        set_times()
-
-        set_charge_type()
-
+        # 4. Show final state.
         take_snapshot()
 
-        save()
-
-        print("\nDone.")
+        print()
+        print("================================")
+        print("Worklog automation completed.")
+        print("================================")
 
     except Exception as exc:
-        print("\nERROR:")
+        print()
+        print("ERROR:")
         print(exc)
         sys.exit(1)
 
