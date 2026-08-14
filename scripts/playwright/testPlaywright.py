@@ -9,7 +9,6 @@ import textwrap
 import time
 
 BASE_URL = "https://support.eiresystems.com/ticket"
-TICKET_LIST_URL = "https://support.eiresystems.com/tickets?showalltickettypes=1"
 SESSION = "halo"
 
 
@@ -126,7 +125,6 @@ def get_ticket_number():
         manual_id = input("Enter ticket number manually: ").strip()
         return manual_id
 
-    # Default option 1: Fetch from page
     print("\nFetching your tickets from HaloPSA...")
     
     js_code = textwrap.dedent(
@@ -170,9 +168,12 @@ def get_ticket_number():
         tickets = []
         for line in output.splitlines():
             if "FETCHED_TICKETS_JSON:" in line:
-                json_str = line.split("FETCHED_TICKETS_JSON:")[1].strip()
-                tickets = json.loads(json_str)
-                break
+                try:
+                    json_str = line.split("FETCHED_TICKETS_JSON:")[1].strip()
+                    tickets = json.loads(json_str)
+                    break
+                except json.JSONDecodeError:
+                    continue
 
         if not tickets:
             print("\nCould not automatically fetch tickets from the page view.")
