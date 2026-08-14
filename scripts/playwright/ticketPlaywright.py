@@ -145,7 +145,7 @@ def goto_ticket(ticket):
 def scrape_ticket_options():
     """
     Intelligently parse ticket IDs, titles, dates, and types from the 
-    playwright-cli snapshot output while correctly preserving titles like months.
+    playwright-cli snapshot output, thoroughly stripping UI noise and 'generic' tags.
     """
     print("\nTaking snapshot to extract tickets and metadata...")
     output = run_cli("snapshot", check=True)
@@ -181,12 +181,16 @@ def scrape_ticket_options():
                 continue
 
             # Skip pure duration lines like "56:30"
-            if re.search(r'^\s*-\s*(generic|text):\s*\d+:\d+\s*$', line):
+            if re.search(r'^\s*-\s*(?:generic|text):\s*\d+:\d+\s*$', line):
                 continue
 
-            # Clean line text
-            clean_line = re.sub(r'^\s*-\s*(generic|text)(\s*"[^"]*")?:\s*', '', line).strip('" ')
-            clean_line = re.sub(r'\[ref=e\d+\]', '', clean_line).strip()
+            # Clean line text thoroughly
+            # 1. Strip ref tags first
+            clean_line = re.sub(r'\[ref=e\d+\]', '', line)
+            # 2. Strip leading bullets, 'generic', 'text', quotes, and colons
+            clean_line = re.sub(r'^\s*-\s*(?:generic|text)?\s*(?:"[^"]*")?\s*:\s*', '', clean_line)
+            clean_line = re.sub(r'^\s*-\s*(?:generic|text)\b', '', clean_line)
+            clean_line = clean_line.strip('" :')
             
             lower_line = clean_line.lower()
             if not clean_line or len(clean_line) < 3:
