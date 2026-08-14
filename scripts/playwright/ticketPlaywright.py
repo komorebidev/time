@@ -206,23 +206,18 @@ def scrape_ticket_options():
 
             ordered_candidates.append(clean_line)
 
-        # Positional / Type-aware resolution:
-        # - For Project Support, company paths containing '/' (like Polaris Holdings...) act as titles.
-        # - For Service Request / Incident, company/customer paths containing '/' appear at the top 
-        #   and should be skipped, leaving the actual title (like "May 2026") right before the timestamp.
+        # Positional / Type-aware resolution based on snapshot layout structure
         if ticket_type == "Project Support":
-            # Look for a candidate with '/' first, or fallback to the last valid candidate
             path_candidates = [c for c in ordered_candidates if '/' in c]
             if path_candidates:
                 title = path_candidates[0]
             elif ordered_candidates:
                 title = ordered_candidates[-1]
         else:
-            # Service Request / Incident: filter out customer path lines containing '/'
+            # For Service Request / Incident, user/customer paths containing '/' appear first 
+            # and should be ignored so we catch the actual title right before the timestamp.
             non_path_candidates = [c for c in ordered_candidates if '/' not in c]
             if non_path_candidates:
-                # The ticket title consistently sits right before the date/type, 
-                # which corresponds to the last non-path candidate in Service Requests.
                 title = non_path_candidates[-1]
             elif ordered_candidates:
                 title = ordered_candidates[-1]
@@ -488,10 +483,36 @@ def main():
         start_time = input("Start time [Leave unchanged, e.g. 09:00]: ").strip()
         end_time = input("End time [Leave unchanged, e.g. 10:00]: ").strip()
 
-        default_charge = "Internal work"
-        charge_type = (
-            input(f"Charge type [{default_charge}]: ").strip() or default_charge
-        )
+        # Charge type selection with '?' option menu
+        charge_options = [
+            "Project Work- Managed Services",
+            "Research (work-specific)",
+            "Professional Development",
+            "Internal Work"
+        ]
+        default_charge = "Internal Work"
+        charge_type = default_charge
+
+        while True:
+            charge_input = input(f"Charge type [? for options] [{default_charge}]: ").strip()
+            if charge_input == "?":
+                print("\nAvailable Charge Types:")
+                print("-" * 35)
+                for idx, opt in enumerate(charge_options, 1):
+                    print(f"  [{idx}] {opt}")
+                print("-" * 35)
+                sel = input("Select option number: ").strip()
+                if sel.isdigit() and 1 <= int(sel) <= len(charge_options):
+                    charge_type = charge_options[int(sel) - 1]
+                    break
+                else:
+                    print("Invalid selection. Try again or enter custom text.")
+            elif not charge_input:
+                charge_type = default_charge
+                break
+            else:
+                charge_type = charge_input
+                break
 
         goto_ticket(ticket)
         run_halo_automation(worklog_text, status, start_time, end_time, charge_type)

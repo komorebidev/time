@@ -20,7 +20,7 @@
             - button "Search (Ctrl + Shift + F)" [ref=e23] [cursor=pointer]:
               - img [ref=e24]: 
             - generic [ref=e26]:
-              - generic [ref=e27]: "45"
+              - generic [ref=e27]: "47"
               - button "Notifications" [ref=e28] [cursor=pointer]:
                 - img [ref=e29]: 
             - button "To-Do" [ref=e32] [cursor=pointer]
@@ -86,7 +86,7 @@
                   - generic "Low" [ref=e157]
                   - text: Low
                 - generic [ref=e159]:
-                  - generic "Raphael Solema (Available)" [ref=e161]: RS
+                  - generic "Raphael Solema (Idle)" [ref=e161]: RS
                   - text: Raphael Solema
                 - generic [ref=e164]: September 2026
                 - generic [ref=e166]: 8/14/2026 10:35
@@ -102,7 +102,7 @@
                   - generic "Low" [ref=e183]
                   - text: Low
                 - generic [ref=e185]:
-                  - generic "Raphael Solema (Available)" [ref=e187]: RS
+                  - generic "Raphael Solema (Idle)" [ref=e187]: RS
                   - text: Raphael Solema
                 - generic [ref=e190]: August 2026
                 - generic [ref=e192]: 8/3/2026 10:27
@@ -118,7 +118,7 @@
                   - generic "Low" [ref=e209]
                   - text: Low
                 - generic [ref=e211]:
-                  - generic "Raphael Solema (Available)" [ref=e213]: RS
+                  - generic "Raphael Solema (Idle)" [ref=e213]: RS
                   - text: Raphael Solema
                 - generic [ref=e216]: July 2026
                 - generic [ref=e218]: 7/3/2026 15:33
@@ -134,7 +134,7 @@
                   - generic "Low" [ref=e235]
                   - text: Low
                 - generic [ref=e237]:
-                  - generic "Raphael Solema (Available)" [ref=e239]: RS
+                  - generic "Raphael Solema (Idle)" [ref=e239]: RS
                   - text: Raphael Solema
                 - generic [ref=e242]: June 2026
                 - generic [ref=e244]: 6/1/2026 10:34
@@ -150,7 +150,7 @@
                   - generic "Low" [ref=e261]
                   - text: Low
                 - generic [ref=e263]:
-                  - generic "Raphael Solema (Available)" [ref=e265]: RS
+                  - generic "Raphael Solema (Idle)" [ref=e265]: RS
                   - text: Raphael Solema
                 - generic [ref=e268]: May 2026
                 - generic [ref=e270]: 5/11/2026 13:55
@@ -166,7 +166,7 @@
                   - generic "Low" [ref=e287]
                   - text: Low
                 - generic [ref=e289]:
-                  - generic "Raphael Solema (Available)" [ref=e291]: RS
+                  - generic "Raphael Solema (Idle)" [ref=e291]: RS
                   - text: Raphael Solema
                 - generic [ref=e294]: Project Assistance - Polaris Holdings (Azure Files)
                 - generic [ref=e296]: 4/8/2026 14:47
@@ -182,7 +182,7 @@
                   - generic "Low" [ref=e313]
                   - text: Low
                 - generic [ref=e315]:
-                  - generic "Raphael Solema (Available)" [ref=e317]: RS
+                  - generic "Raphael Solema (Idle)" [ref=e317]: RS
                   - text: Raphael Solema
                 - generic [ref=e320]: April 2026
                 - generic [ref=e322]: 4/2/2026 10:36
@@ -198,7 +198,7 @@
                   - generic "Low" [ref=e339]
                   - text: Low
                 - generic [ref=e341]:
-                  - generic "Raphael Solema (Available)" [ref=e343]: RS
+                  - generic "Raphael Solema (Idle)" [ref=e343]: RS
                   - text: Raphael Solema
                 - generic [ref=e346]: March 2026
                 - generic [ref=e348]: 3/10/2026 14:36
