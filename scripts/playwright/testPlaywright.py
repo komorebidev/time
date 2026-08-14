@@ -1,3 +1,4 @@
+import atexit
 import glob
 import json
 import os
@@ -95,18 +96,27 @@ def remove_readonly(func, path, excinfo):
 
 def cleanup_local_artifacts():
     """
-    Remove local .playwright or session folders created in the working directory.
+    Remove local .playwright or session folders created in the working directory
+    with retry logic to handle Windows file locks.
     """
     folders_to_remove = [".playwright", ".playwright-cli"]
     
     for folder in folders_to_remove:
         if os.path.exists(folder) and os.path.isdir(folder):
-            try:
-                # Close any open file handles to log files first if tracked
-                shutil.rmtree(folder, onerror=remove_readonly)
-                print(f"Cleaned up local folder: {folder}")
-            except Exception as e:
-                print(f"Note: Could not fully remove folder {folder}: {e}")
+            for attempt in range(3):
+                try:
+                    shutil.rmtree(folder, onerror=remove_readonly)
+                    print(f"Cleaned up local folder: {folder}")
+                    break
+                except Exception as e:
+                    if attempt == 2:
+                        print(f"Note: Could not fully remove folder {folder}: {e}")
+                    else:
+                        time.sleep(0.5)
+
+
+# Register cleanup to run automatically on ANY script exit (errors, Ctrl+C, or normal finish)
+atexit.register(cleanup_local_artifacts)
 
 
 def attach():
@@ -161,10 +171,12 @@ def get_ticket_number():
 
             const tickets = await page.evaluate(() => {
                 const results = [];
-                const links = document.querySelectorAll('a[href*="ticket?id="]');
+                
+                // 1. Search all anchor links for ticket IDs in hrefs or text
+                const links = document.querySelectorAll('a');
                 links.forEach(link => {
-                    const href = link.getAttribute('href');
-                    const match = href.match(/id=(\\d+)/);
+                    const href = link.getAttribute('href') || '';
+                    const match = href.match(/(?:id=|ticket[\\/=])(\\d+)/i);
                     if (match) {
                         const id = match[1];
                         let title = link.innerText.trim();
@@ -176,6 +188,20 @@ def get_ticket_number():
                         }
                     }
                 });
+
+                // 2. If nothing found via links, look for grid rows or cells containing numbers
+                if (results.length === 0) {
+                    const cells = document.querySelectorAll('td, .grid-cell, [role="gridcell"], tr');
+                    cells.forEach(cell => {
+                        const text = cell.innerText.trim();
+                        if (/^\\d{4,7}$/.test(text)) {
+                            if (!results.some(r => r.id === text)) {
+                                results.push({ id: text, title: "Ticket #" + text });
+                            }
+                        }
+                    });
+                }
+
                 return results.slice(0, 15);
             });
 
@@ -460,9 +486,6 @@ def main():
         print("ERROR:")
         print(exc)
         sys.exit(1)
-
-    finally:
-        cleanup_local_artifacts()
 
 
 if __name__ == "__main__":
