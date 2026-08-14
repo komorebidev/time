@@ -14,10 +14,6 @@ import time
 BASE_URL = "https://support.eiresystems.com/ticket"
 SESSION = "halo"
 
-# Set your token here so it is available to all playwright-cli commands
-# Improve this later so that the token is not here...
-os.environ["PLAYWRIGHT_MCP_EXTENSION_TOKEN"] = R8f00gl_b0eYIH53KGYYHRTXWGBUic7QOJ3i6MiKLak
-
 
 def find_playwright_cli():
     """
@@ -39,10 +35,8 @@ CLI = find_playwright_cli()
 
 def run_cli(*args, check=True):
     """
-    Run playwright-cli safely across platforms using the current environment.
+    Run playwright-cli safely across platforms.
     """
-    env = os.environ.copy()
-
     if platform.system() == "Windows":
         quoted_args = []
         for arg in args:
@@ -64,7 +58,6 @@ def run_cli(*args, check=True):
             encoding="utf-8",
             errors="replace",
             shell=True,
-            env=env,
         )
     else:
         command = [CLI, f"--s={SESSION}", *[str(arg) for arg in args]]
@@ -80,7 +73,6 @@ def run_cli(*args, check=True):
             encoding="utf-8",
             errors="replace",
             shell=False,
-            env=env,
         )
 
     if result.stdout:
@@ -128,32 +120,10 @@ atexit.register(cleanup_local_artifacts)
 
 def attach():
     """
-    Attach the CLI session to Microsoft Edge using a PowerShell command block
-    that sets the extension token environment variable.
+    Attach the CLI session to Microsoft Edge.
     """
-    print("Attaching to Microsoft Edge via PowerShell...")
-
-    ps_command = f"""
-    $env:PLAYWRIGHT_MCP_EXTENSION_TOKEN = 'inserttokenhere'
-    & "{CLI}" --s={SESSION} attach --extension=msedge
-    """
-
-    result = subprocess.run(
-        ["powershell", "-ExecutionPolicy", "Bypass", "-Command", ps_command],
-        capture_output=True,
-        text=True,
-        encoding="utf-8",
-        errors="replace"
-    )
-
-    if result.stdout:
-        print(result.stdout)
-    if result.stderr:
-        print(result.stderr, file=sys.stderr)
-
-    if result.returncode != 0:
-        raise RuntimeError(f"PowerShell attach command failed with exit code {result.returncode}")
-
+    print("\nAttaching to Microsoft Edge...")
+    run_cli("attach", "--extension=msedge", check=True)
     time.sleep(1)
 
 
