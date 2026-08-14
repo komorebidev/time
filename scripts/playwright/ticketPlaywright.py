@@ -120,31 +120,39 @@ atexit.register(cleanup_local_artifacts)
 
 def attach():
     """
-    Attach the CLI session to the already-open Microsoft Edge tab.
-    If the extension token prompt appears, prompts the user to paste it 
-    in-memory for this session and retries automatically.
+    Triggers the attach command briefly to surface the extension prompt/token,
+    allows the user to enter the token in the terminal, and then executes 
+    the final successful attachment.
     """
-    print("Attaching to Microsoft Edge...")
+    print("Preparing connection to Microsoft Edge...")
     
-    for attempt in range(2):
-        output = run_cli("attach", "--extension=msedge", check=False)
-        
-        if "PLAYWRIGHT_MCP_EXTENSION_TOKEN" in output or "bypass the connection dialog" in output:
-            print("\n" + "=" * 60)
-            print("Playwright Extension Connection Token Required")
-            print("=" * 60)
-            print("The terminal output above requested an extension token.")
-            print("-" * 60)
+    # If the token is already set in memory, skip triggering and attach directly
+    if not os.environ.get("PLAYWRIGHT_MCP_EXTENSION_TOKEN"):
+        print("Triggering extension connection check...")
+        try:
+            # Run attach with a short timeout so it doesn't block permanently
+            if platform.system() == "Windows":
+                cmd_str = f'"{CLI}" "--s={SESSION}" attach --extension=msedge'
+                subprocess.run(cmd_str, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, shell=True, timeout=2)
+            else:
+                subprocess.run([CLI, f"--s={SESSION}", "attach", "--extension=msedge"], stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, shell=False, timeout=2)
+        except subprocess.TimeoutExpired:
+            # Expected: it hung waiting for extension connection, which successfully triggered the prompt
+            pass
+        except Exception:
+            pass
 
-            token = input("Enter your PLAYWRIGHT_MCP_EXTENSION_TOKEN: ").strip()
-            if token:
-                os.environ["PLAYWRIGHT_MCP_EXTENSION_TOKEN"] = token
-                print("Retrying attachment with token...\n")
-                continue
-        
-        run_cli("attach", "--extension=msedge", check=True)
-        time.sleep(1)
-        return
+        print("\n" + "=" * 60)
+        print("Playwright Extension Connection Token Required")
+        print("=" * 60)
+        token = input("Enter your PLAYWRIGHT_MCP_EXTENSION_TOKEN: ").strip()
+        if token:
+            os.environ["PLAYWRIGHT_MCP_EXTENSION_TOKEN"] = token
+            print("Token accepted. Attaching...")
+
+    # Run the actual attach using the provided token variable
+    run_cli("attach", "--extension=msedge", check=True)
+    time.sleep(1)
 
 
 def goto_ticket(ticket):
