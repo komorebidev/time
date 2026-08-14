@@ -1,19 +1,68 @@
-from playwright.sync_api import sync_playwright
+import subprocess
+import sys
+
+SESSION = "halo"
 
 
-with sync_playwright() as p:
-    print("Connecting to Edge...")
-
-    browser = p.chromium.connect_over_cdp(
-        "http://127.0.0.1:9222"
+def pw(*args):
+    result = subprocess.run(
+        ["playwright-cli", f"-s={SESSION}", *args],
+        text=True,
+        capture_output=True,
     )
 
-    print("Connected!")
+    if result.stdout:
+        print(result.stdout)
 
-    for i, context in enumerate(browser.contexts):
-        print(f"\nContext {i}:")
+    if result.returncode != 0:
+        if result.stderr:
+            print(result.stderr, file=sys.stderr)
+        raise RuntimeError(f"Playwright CLI failed: {' '.join(args)}")
 
-        for j, page in enumerate(context.pages):
-            print(f"  Tab {j}")
-            print(f"    URL:   {page.url}")
-            print(f"    Title: {page.title()}")
+    return result.stdout
+
+
+def attach():
+    print("Attaching to Microsoft Edge...")
+    
+    result = subprocess.run(
+        [
+            "playwright-cli",
+            "attach",
+            "--extension=msedge",
+            f"-s={SESSION}",
+        ],
+        text=True,
+        capture_output=True,
+    )
+
+    print(result.stdout)
+
+    if result.returncode != 0:
+        print(result.stderr, file=sys.stderr)
+        raise RuntimeError("Could not attach to Edge.")
+
+
+def main():
+    attach()
+
+    ticket = input("Ticket number: ").strip()
+
+    if not ticket.isdigit():
+        print("Invalid ticket number.")
+        return
+
+    url = (
+        f"https://support.eiresystems.com/"
+        f"ticket?id={ticket}&showalltickettypes=1"
+    )
+
+    print(f"Opening ticket {ticket}...")
+    pw("goto", url)
+
+    print("Taking snapshot...")
+    pw("snapshot")
+
+
+if __name__ == "__main__":
+    main()
