@@ -2,6 +2,7 @@ import atexit
 import json
 import os
 import platform
+import re
 import shutil
 import stat
 import subprocess
@@ -143,76 +144,23 @@ def goto_ticket(ticket):
 
 def scrape_ticket_options():
     """
-    Scrape ticket IDs and titles using a DOM text node walker.
+    Scrape ticket IDs directly from playwright-cli snapshot output.
     """
-    print("\nScraping tickets from current page...")
+    print("\nTaking snapshot to extract tickets...")
+    output = run_cli("snapshot", check=True)
     
-    js_code = textwrap.dedent(
-        """
-        async page => {
-            const tickets = await page.evaluate(() => {
-                const results = [];
-                const seenIds = new Set();
-                
-                const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
-                let node;
-                while (node = walker.nextNode()) {
-                    const val = node.nodeValue.trim();
-                    const match = val.match(/^00\\d{5}$/);
-                    if (match) {
-                        const ticketId = match[0];
-                        if (!seenIds.has(ticketId)) {
-                            seenIds.add(ticketId);
-                            let container = node.parentElement;
-                            let rowText = "";
-                            for (let i = 0; i < 5 && container && container !== document.body; i++) {
-                                rowText = container.innerText || "";
-                                if (rowText.includes("Service Request") || rowText.includes("Incident") || rowText.includes("On Hold") || rowText.length > 40) {
-                                    break;
-                                }
-                                container = container.parentElement;
-                            }
-                            const cleanText = (rowText || val).replace(/\\n/g, ' | ').trim();
-                            results.push({
-                                id: ticketId,
-                                title: cleanText.substring(0, 120)
-                            });
-                        }
-                    }
-                }
-                return results;
-            });
-
-            console.log(JSON.stringify(tickets, null, 2));
-        }
-        """
-    )
-
-    temp_path = None
-    try:
-        with tempfile.NamedTemporaryFile(
-            mode="w", suffix=".js", prefix="halo_scrape_", delete=False, encoding="utf-8"
-        ) as temp_file:
-            temp_file.write(js_code)
-            temp_path = temp_file.name
-
-        output = run_cli("run-code", f"--filename={temp_path}")
-        
-        for line in output.splitlines():
-            line_str = line.strip()
-            if line_str.startswith("[") or line_str.startswith("{"):
-                try:
-                    tickets = json.loads(line_str)
-                    return tickets
-                except json.JSONDecodeError:
-                    pass
-        return []
-    finally:
-        if temp_path and os.path.exists(temp_path):
-            try:
-                os.remove(temp_path)
-            except OSError:
-                pass
+    # Find all 7-digit ticket numbers starting with 00 inside quotes in the snapshot tree
+    found_ids = re.findall(r'"(00\d{5})"', output)
+    
+    # Deduplicate while preserving order
+    seen = set()
+    unique_tickets = []
+    for tid in found_ids:
+        if tid not in seen:
+            seen.add(tid)
+            unique_tickets.append({"id": tid, "title": f"Ticket {tid}"})
+            
+    return unique_tickets
 
 
 def run_halo_automation(worklog_text, status, start_time, end_time, charge_type):
@@ -406,7 +354,7 @@ def main():
         ticket = ""
         choice = input(
             "\n[1] Enter Ticket ID manually\n"
-            "[2] Scrape Ticket IDs from current Edge page view\n"
+            "[2] Scrape Ticket IDs from current Edge page view via snapshot\n"
             "Select option [1/2]: "
         ).strip()
 
@@ -414,8 +362,8 @@ def main():
             tickets = scrape_ticket_options()
             if tickets:
                 print(f"\nFound {len(tickets)} tickets on the current page:")
-                for idx, t in enumerate(tickets[:15], 1):
-                    print(f"  [{idx}] ID: {t['id']} - {t['title'][:60]}...")
+                for idx, t in enumerate(tickets, 1):
+                    print(f"  [{idx}] ID: {t['id']}")
                 
                 sel = input("\nEnter selection number or type a Ticket ID directly: ").strip()
                 if sel.isdigit() and 1 <= int(sel) <= len(tickets):
@@ -424,7 +372,7 @@ def main():
                 else:
                     ticket = sel
             else:
-                print("No tickets could be automatically scraped from this page.")
+                print("No tickets could be automatically scraped from this snapshot.")
 
         while not ticket or not ticket.isdigit():
             ticket = input("\nEnter Ticket Number: ").strip()
