@@ -34,9 +34,7 @@ def find_playwright_cli():
     if cli:
         return cli
 
-    raise FileNotFoundError(
-        "playwright-cli was not found in PATH."
-    )
+    raise FileNotFoundError("playwright-cli was not found in PATH.")
 
 
 CLI = find_playwright_cli()
@@ -44,41 +42,71 @@ CLI = find_playwright_cli()
 
 def run_cli(*args, check=True):
     """
-    Run playwright-cli.
+    Run playwright-cli safely across platforms.
     """
-    command = [
-        CLI,
-        f"--s={SESSION}",
-        *[str(arg) for arg in args],
-    ]
+    if platform.system() == "Windows":
+        # Quote arguments on Windows so cmd.exe doesn't split on '&' or spaces
+        quoted_args = []
+        for arg in args:
+            s = str(arg)
+            if not (s.startswith('"') and s.endswith('"')):
+                s = f'"{s}"'
+            quoted_args.append(s)
 
-    print()
-    print("> " + " ".join(command))
+        cmd_str = f'"{CLI}" "--s={SESSION}" ' + " ".join(quoted_args)
 
-    # FIX: Windows .cmd / .bat files require shell=True to execute properly via subprocess
-    use_shell = platform.system() == "Windows"
+        print()
+        print("> " + cmd_str)
 
-    result = subprocess.run(
-        command,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.STDOUT,
-        text=True,
-        encoding="utf-8",
-        errors="replace",
-        shell=use_shell,
-    )
+        result = subprocess.run(
+            cmd_str,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            shell=True,
+        )
+    else:
+        command = [CLI, f"--s={SESSION}", *[str(arg) for arg in args]]
+
+        print()
+        print("> " + " ".join(command))
+
+        result = subprocess.run(
+            command,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            shell=False,
+        )
 
     if result.stdout:
         print(result.stdout)
 
     if check and result.returncode != 0:
         raise RuntimeError(
-            "Playwright CLI command failed:\n"
-            + " ".join(command)
-            + f"\nExit code: {result.returncode}"
+            f"Playwright CLI command failed with exit code {result.returncode}"
         )
 
     return result.stdout
+
+
+def cleanup_local_artifacts():
+    """
+    Remove local .playwright or session folders created in the working directory.
+    """
+    folders_to_remove = [".playwright", ".playwright-cli"]
+    
+    for folder in folders_to_remove:
+        if os.path.exists(folder) and os.path.isdir(folder):
+            try:
+                shutil.rmtree(folder)
+                print(f"Cleaned up local folder: {folder}")
+            except OSError:
+                pass
 
 
 def attach():
@@ -98,17 +126,10 @@ def goto_ticket(ticket):
     """
     Navigate to the requested Halo ticket.
     """
-    url = (
-        f"{BASE_URL}"
-        f"?id={ticket}"
-        f"&showalltickettypes=1"
-    )
+    url = f"{BASE_URL}?id={ticket}&showalltickettypes=1"
 
     print(f"\nOpening ticket {ticket}...")
-    run_cli(
-        "goto",
-        url,
-    )
+    run_cli("goto", url)
     time.sleep(1)
 
 
@@ -332,6 +353,9 @@ def main():
         print("ERROR:")
         print(exc)
         sys.exit(1)
+
+    finally:
+        cleanup_local_artifacts()
 
 
 if __name__ == "__main__":
