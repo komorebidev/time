@@ -145,7 +145,7 @@ def goto_ticket(ticket):
 def scrape_ticket_options():
     """
     Intelligently parse ticket IDs, titles, dates, and types from the 
-    playwright-cli snapshot output, ignoring assignee paths and user names.
+    playwright-cli snapshot output using strict positional and ticket-type rules.
     """
     print("\nTaking snapshot to extract tickets and metadata...")
     output = run_cli("snapshot", check=True)
@@ -162,55 +162,70 @@ def scrape_ticket_options():
         title = f"Ticket {ticket_id}"
         date_str = ""
         ticket_type = ""
-        candidate_titles = []
         
+        # First pass: Determine ticket type and date string
         for line in block_lines:
-            # Extract date
             if re.search(r'\d{1,2}/\d{1,2}/\d{4}\s+\d{2}:\d{2}', line):
                 date_match = re.search(r'([\d/]+\s+[\d:]+)', line)
                 if date_match:
                     date_str = date_match.group(1)
-                continue
-            
-            # Extract ticket type
             if any(t in line for t in ["Service Request", "Incident", "Project Support"]):
                 for t in ["Service Request", "Incident", "Project Support"]:
                     if t in line:
                         ticket_type = t
                         break
-                continue
 
-            # Skip pure duration lines like "56:30"
+        # Collect and clean meaningful text lines in exact order of appearance
+        ordered_candidates = []
+        for line in block_lines:
+            # Skip duration lines, dates, types, and UI metadata
             if re.search(r'^\s*-\s*(?:generic|text):\s*\d+:\d+\s*$', line):
                 continue
+            if re.search(r'\d{1,2}/\d{1,2}/\d{4}\s+\d{2}:\d{2}', line):
+                continue
+            if any(t in line for t in ["Service Request", "Incident", "Project Support"]):
+                continue
 
-            # Clean line text thoroughly
             clean_line = re.sub(r'\[ref=e\d+\]', '', line)
             clean_line = re.sub(r'^\s*-\s*(?:generic|text)?\s*(?:"[^"]*")?\s*:\s*', '', clean_line)
             clean_line = re.sub(r'^\s*-\s*(?:generic|text)\b', '', clean_line)
             clean_line = clean_line.strip('" :')
             
-            lower_line = clean_line.lower()
-            if not clean_line or len(clean_line) < 3:
+            if not clean_line or len(clean_line) < 2:
                 continue
+                
+            lower_line = clean_line.lower()
             if re.match(r'^00\d{5}$', clean_line):
                 continue
             if re.match(r'^\d+:\d+$', clean_line):
                 continue
-            if any(kw in lower_line for kw in ['cursor=pointer', 'checkbox', 'bulk select', 'available', 'on hold', 'completed', 'low', 'medium', 'high', 'incident', 'service request', 'project support']):
+            if any(kw in lower_line for kw in ['cursor=pointer', 'checkbox', 'bulk select', 'available', 'on hold', 'completed', 'low', 'medium', 'high']):
                 continue
-            if re.search(r'\d{1,2}/\d{1,2}/\d{4}', clean_line):
-                continue
-            # Filter out assignee user names, initials, and company paths like "Polaris Holdings Co., Ltd./Main Site/Masanobu Mochiki"
-            if 'eire systems/' in lower_line or '/' in clean_line or (len(clean_line) <= 3 and clean_line.isupper()):
+            if len(clean_line) <= 3 and clean_line.isupper():
                 continue
 
-            candidate_titles.append(clean_line)
+            ordered_candidates.append(clean_line)
 
-        # Pick the most descriptive candidate as the title
-        if candidate_titles:
-            candidate_titles.sort(key=len, reverse=True)
-            title = candidate_titles[0]
+        # Positional / Type-aware resolution:
+        # - For Project Support, company paths containing '/' (like Polaris Holdings...) act as titles.
+        # - For Service Request / Incident, company/customer paths containing '/' appear at the top 
+        #   and should be skipped, leaving the actual title (like "May 2026") right before the timestamp.
+        if ticket_type == "Project Support":
+            # Look for a candidate with '/' first, or fallback to the last valid candidate
+            path_candidates = [c for c in ordered_candidates if '/' in c]
+            if path_candidates:
+                title = path_candidates[0]
+            elif ordered_candidates:
+                title = ordered_candidates[-1]
+        else:
+            # Service Request / Incident: filter out customer path lines containing '/'
+            non_path_candidates = [c for c in ordered_candidates if '/' not in c]
+            if non_path_candidates:
+                # The ticket title consistently sits right before the date/type, 
+                # which corresponds to the last non-path candidate in Service Requests.
+                title = non_path_candidates[-1]
+            elif ordered_candidates:
+                title = ordered_candidates[-1]
 
         tickets.append({
             "id": ticket_id,
