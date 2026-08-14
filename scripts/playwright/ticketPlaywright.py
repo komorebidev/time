@@ -14,6 +14,10 @@ import time
 BASE_URL = "https://support.eiresystems.com/ticket"
 SESSION = "halo"
 
+# Set your token here so it is available to all playwright-cli commands
+# Improve this later so that the token is not here...
+os.environ["PLAYWRIGHT_MCP_EXTENSION_TOKEN"] = R8f00gl_b0eYIH53KGYYHRTXWGBUic7QOJ3i6MiKLak
+
 
 def find_playwright_cli():
     """
@@ -35,8 +39,10 @@ CLI = find_playwright_cli()
 
 def run_cli(*args, check=True):
     """
-    Run playwright-cli safely across platforms.
+    Run playwright-cli safely across platforms using the current environment.
     """
+    env = os.environ.copy()
+
     if platform.system() == "Windows":
         quoted_args = []
         for arg in args:
@@ -58,6 +64,7 @@ def run_cli(*args, check=True):
             encoding="utf-8",
             errors="replace",
             shell=True,
+            env=env,
         )
     else:
         command = [CLI, f"--s={SESSION}", *[str(arg) for arg in args]]
@@ -73,6 +80,7 @@ def run_cli(*args, check=True):
             encoding="utf-8",
             errors="replace",
             shell=False,
+            env=env,
         )
 
     if result.stdout:
@@ -120,38 +128,32 @@ atexit.register(cleanup_local_artifacts)
 
 def attach():
     """
-    Triggers the attach command briefly to surface the extension prompt/token,
-    allows the user to enter the token in the terminal, and then executes 
-    the final successful attachment.
+    Attach the CLI session to Microsoft Edge using a PowerShell command block
+    that sets the extension token environment variable.
     """
-    print("Preparing connection to Microsoft Edge...")
-    
-    # If the token is already set in memory, skip triggering and attach directly
-    if not os.environ.get("PLAYWRIGHT_MCP_EXTENSION_TOKEN"):
-        print("Triggering extension connection check...")
-        try:
-            # Run attach with a short timeout so it doesn't block permanently
-            if platform.system() == "Windows":
-                cmd_str = f'"{CLI}" "--s={SESSION}" attach --extension=msedge'
-                subprocess.run(cmd_str, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, shell=True, timeout=2)
-            else:
-                subprocess.run([CLI, f"--s={SESSION}", "attach", "--extension=msedge"], stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, shell=False, timeout=2)
-        except subprocess.TimeoutExpired:
-            # Expected: it hung waiting for extension connection, which successfully triggered the prompt
-            pass
-        except Exception:
-            pass
+    print("Attaching to Microsoft Edge via PowerShell...")
 
-        print("\n" + "=" * 60)
-        print("Playwright Extension Connection Token Required")
-        print("=" * 60)
-        token = input("Enter your PLAYWRIGHT_MCP_EXTENSION_TOKEN: ").strip()
-        if token:
-            os.environ["PLAYWRIGHT_MCP_EXTENSION_TOKEN"] = token
-            print("Token accepted. Attaching...")
+    ps_command = f"""
+    $env:PLAYWRIGHT_MCP_EXTENSION_TOKEN = 'inserttokenhere'
+    & "{CLI}" --s={SESSION} attach --extension=msedge
+    """
 
-    # Run the actual attach using the provided token variable
-    run_cli("attach", "--extension=msedge", check=True)
+    result = subprocess.run(
+        ["powershell", "-ExecutionPolicy", "Bypass", "-Command", ps_command],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace"
+    )
+
+    if result.stdout:
+        print(result.stdout)
+    if result.stderr:
+        print(result.stderr, file=sys.stderr)
+
+    if result.returncode != 0:
+        raise RuntimeError(f"PowerShell attach command failed with exit code {result.returncode}")
+
     time.sleep(1)
 
 
