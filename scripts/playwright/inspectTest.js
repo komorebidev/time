@@ -1,12 +1,7 @@
 async page => {
-    const info = await page.evaluate(() => {
-        const rows = document.querySelectorAll('.ag-row, tr, [role="row"]');
-        return Array.from(rows).map(row => {
-            return {
-                outerHTML: row.outerHTML.substring(0, 300), // Check attributes
-                text: row.innerText.replace(/\n/g, ' | ')
-            };
-        });
+    const tickets = await page.evaluate(() => {
+        // Put your test code here and return an array
+        return [{id: "0026229", title: "Test Ticket"}];
     });
-    console.log(JSON.stringify(info, null, 2));
+    console.log(JSON.stringify(tickets, null, 2));
 }
