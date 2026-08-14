@@ -143,7 +143,7 @@ def goto_ticket(ticket):
 
 def scrape_ticket_options():
     """
-    Scrape ticket IDs and titles directly from the live DOM text nodes of the current page.
+    Scrape ticket IDs and titles using a DOM text node walker.
     """
     print("\nScraping tickets from current page...")
     
@@ -154,22 +154,32 @@ def scrape_ticket_options():
                 const results = [];
                 const seenIds = new Set();
                 
-                const allElements = document.querySelectorAll('div, span, a');
-                allElements.forEach(el => {
-                    const text = el.innerText || "";
-                    const match = text.match(/\\b(00\\d{5})\\b/);
+                const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
+                let node;
+                while (node = walker.nextNode()) {
+                    const val = node.nodeValue.trim();
+                    const match = val.match(/^00\\d{5}$/);
                     if (match) {
-                        const ticketId = match[1];
-                        if (!seenIds.has(ticketId) && text.length < 300) {
+                        const ticketId = match[0];
+                        if (!seenIds.has(ticketId)) {
                             seenIds.add(ticketId);
-                            const cleanText = text.replace(/\\n/g, ' | ').trim();
+                            let container = node.parentElement;
+                            let rowText = "";
+                            for (let i = 0; i < 5 && container && container !== document.body; i++) {
+                                rowText = container.innerText || "";
+                                if (rowText.includes("Service Request") || rowText.includes("Incident") || rowText.includes("On Hold") || rowText.length > 40) {
+                                    break;
+                                }
+                                container = container.parentElement;
+                            }
+                            const cleanText = (rowText || val).replace(/\\n/g, ' | ').trim();
                             results.push({
                                 id: ticketId,
-                                title: cleanText.substring(0, 100)
+                                title: cleanText.substring(0, 120)
                             });
                         }
                     }
-                });
+                }
                 return results;
             });
 
