@@ -145,7 +145,7 @@ def goto_ticket(ticket):
 def scrape_ticket_options():
     """
     Intelligently parse ticket IDs, titles, dates, and types from the 
-    playwright-cli snapshot output using strict noise and duration filtering.
+    playwright-cli snapshot output while correctly preserving titles like months.
     """
     print("\nTaking snapshot to extract tickets and metadata...")
     output = run_cli("snapshot", check=True)
@@ -162,7 +162,6 @@ def scrape_ticket_options():
         title = f"Ticket {ticket_id}"
         date_str = ""
         ticket_type = ""
-        
         candidate_titles = []
         
         for line in block_lines:
@@ -171,35 +170,39 @@ def scrape_ticket_options():
                 date_match = re.search(r'([\d/]+\s+[\d:]+)', line)
                 if date_match:
                     date_str = date_match.group(1)
+                continue
             
             # Extract ticket type
-            elif any(t in line for t in ["Service Request", "Incident", "Project Support"]):
+            if any(t in line for t in ["Service Request", "Incident", "Project Support"]):
                 for t in ["Service Request", "Incident", "Project Support"]:
                     if t in line:
                         ticket_type = t
                         break
-            
-            # Filter out UI elements, timestamps, durations (e.g., 56:30), statuses, priorities, and names
-            elif any(marker in line.lower() for marker in [
-                'cursor=pointer', 'checkbox', 'bulk select', 'eire systems/', 
-                'on hold', 'completed', 'low', 'medium', 'high', 'march', 'april', 
-                'may', 'june', 'july', 'august', 'september', 'october', 'november', 'december'
-            ]):
                 continue
-            elif re.search(r'^\s*-\s*(generic|text):\s*\d+:\d+\s*$', line):
-                continue # Skip pure duration lines like "56:30"
-            else:
-                # Clean line text
-                clean_line = re.sub(r'^\s*-\s*(generic|text)(\s*"[^"]*")?:\s*', '', line).strip('" ')
-                clean_line = re.sub(r'\[ref=e\d+\]', '', clean_line).strip()
-                
-                # Exclude durations, ticket types, IDs, dates, and short tags from being considered titles
-                if (len(clean_line) > 5 and 
-                    not re.match(r'^00\d{5}$', clean_line) and 
-                    not re.match(r'^\d+:\d+$', clean_line) and
-                    not re.match(r'^\d{1,2}/\d{1,2}/\d{4}', clean_line) and
-                    clean_line not in ["Service Request", "Incident", "Project Support"]):
-                    candidate_titles.append(clean_line)
+
+            # Skip pure duration lines like "56:30"
+            if re.search(r'^\s*-\s*(generic|text):\s*\d+:\d+\s*$', line):
+                continue
+
+            # Clean line text
+            clean_line = re.sub(r'^\s*-\s*(generic|text)(\s*"[^"]*")?:\s*', '', line).strip('" ')
+            clean_line = re.sub(r'\[ref=e\d+\]', '', clean_line).strip()
+            
+            lower_line = clean_line.lower()
+            if not clean_line or len(clean_line) < 3:
+                continue
+            if re.match(r'^00\d{5}$', clean_line):
+                continue
+            if re.match(r'^\d+:\d+$', clean_line):
+                continue
+            if any(kw in lower_line for kw in ['cursor=pointer', 'checkbox', 'bulk select', 'available', 'on hold', 'completed', 'low', 'medium', 'high', 'incident', 'service request', 'project support']):
+                continue
+            if re.search(r'\d{1,2}/\d{1,2}/\d{4}', clean_line):
+                continue
+            if 'eire systems/' in lower_line or (len(clean_line) <= 3 and clean_line.isupper()):
+                continue
+
+            candidate_titles.append(clean_line)
 
         # Pick the most descriptive candidate as the title
         if candidate_titles:
