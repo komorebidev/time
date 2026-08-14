@@ -1,4 +1,5 @@
 import os
+import platform
 import shutil
 import subprocess
 import sys
@@ -6,9 +7,7 @@ import tempfile
 import textwrap
 import time
 
-
 BASE_URL = "https://support.eiresystems.com/ticket"
-
 SESSION = "halo"
 
 WORKLOG_TEXT = (
@@ -27,14 +26,11 @@ def find_playwright_cli():
     """
     Find playwright-cli without hard-coding the Windows username.
     """
-
     cli = shutil.which("playwright-cli")
-
     if cli:
         return cli
 
     cli = shutil.which("playwright-cli.cmd")
-
     if cli:
         return cli
 
@@ -49,12 +45,7 @@ CLI = find_playwright_cli()
 def run_cli(*args, check=True):
     """
     Run playwright-cli.
-
-    Arguments are passed directly rather than constructing a cmd.exe
-    command string. This prevents '&' in URLs from being interpreted
-    as a command separator.
     """
-
     command = [
         CLI,
         f"--s={SESSION}",
@@ -64,6 +55,9 @@ def run_cli(*args, check=True):
     print()
     print("> " + " ".join(command))
 
+    # FIX: Windows .cmd / .bat files require shell=True to execute properly via subprocess
+    use_shell = platform.system() == "Windows"
+
     result = subprocess.run(
         command,
         stdout=subprocess.PIPE,
@@ -71,6 +65,7 @@ def run_cli(*args, check=True):
         text=True,
         encoding="utf-8",
         errors="replace",
+        shell=use_shell,
     )
 
     if result.stdout:
@@ -91,14 +86,11 @@ def attach():
     Attach the CLI session to the already-open Microsoft Edge tab
     through the Playwright browser extension.
     """
-
     print("Attaching to Microsoft Edge...")
-
     run_cli(
         "attach",
         "--extension=msedge",
     )
-
     time.sleep(1)
 
 
@@ -106,7 +98,6 @@ def goto_ticket(ticket):
     """
     Navigate to the requested Halo ticket.
     """
-
     url = (
         f"{BASE_URL}"
         f"?id={ticket}"
@@ -114,23 +105,17 @@ def goto_ticket(ticket):
     )
 
     print(f"\nOpening ticket {ticket}...")
-
     run_cli(
         "goto",
         url,
     )
-
     time.sleep(1)
 
 
 def run_halo_automation():
     """
     Run the actual HaloPSA Worklog automation using Playwright code.
-
-    Using run-code here means we can use normal Playwright locators
-    instead of relying on generated CLI snapshot references.
     """
-
     js_code = textwrap.dedent(
         f"""
         async page => {{
@@ -143,7 +128,6 @@ def run_halo_automation():
 
             await page.waitForTimeout(750);
 
-
             // ---------------------------------------------------------
             // WORKLOG TEXT
             // ---------------------------------------------------------
@@ -154,15 +138,14 @@ def run_halo_automation():
                 '[contenteditable="true"]'
             ).first();
 
-            await editor.waitFor({
+            await editor.waitFor({{
                 state: "visible",
                 timeout: 10000
-            });
+            }});
 
             await editor.fill(
                 {WORKLOG_TEXT!r}
             );
-
 
             // ---------------------------------------------------------
             // STATUS
@@ -182,7 +165,6 @@ def run_halo_automation():
                 {{ exact: true }}
             ).click();
 
-
             // ---------------------------------------------------------
             // JOB START / END TIMES
             // ---------------------------------------------------------
@@ -194,13 +176,6 @@ def run_halo_automation():
             console.log(
                 "Setting Job End: {END_TIME}"
             );
-
-            /*
-             * Halo exposes the two time fields as unnamed text inputs.
-             *
-             * We identify the inputs whose current value looks like
-             * HH:MM, then fill the first two.
-             */
 
             const timeInputIndexes = await page.locator(
                 "input"
@@ -250,7 +225,6 @@ def run_halo_automation():
                 .nth(timeInputIndexes[1])
                 .fill("{END_TIME}");
 
-
             // ---------------------------------------------------------
             // CHARGE TYPE
             // ---------------------------------------------------------
@@ -270,7 +244,6 @@ def run_halo_automation():
                 {CHARGE_TYPE!r},
                 {{ exact: true }}
             ).click();
-
 
             // ---------------------------------------------------------
             // FINAL CHECK
@@ -295,8 +268,6 @@ def run_halo_automation():
         """
     )
 
-    # run-code accepts a filename. Creating a temporary JS file avoids
-    # Windows quoting problems with the large JavaScript expression.
     temp_path = None
 
     try:
@@ -330,9 +301,7 @@ def take_snapshot():
     """
     Take a final snapshot so we can verify the result.
     """
-
     print("\nTaking final snapshot...")
-
     run_cli("snapshot")
 
 
@@ -348,16 +317,9 @@ def main():
         return
 
     try:
-        # 1. Attach to existing Edge session.
         attach()
-
-        # 2. Navigate to ticket.
         goto_ticket(ticket)
-
-        # 3. Perform the complete Worklog automation.
         run_halo_automation()
-
-        # 4. Show final state.
         take_snapshot()
 
         print()
