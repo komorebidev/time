@@ -214,8 +214,6 @@ def scrape_ticket_options():
             elif ordered_candidates:
                 title = ordered_candidates[-1]
         else:
-            # For Service Request / Incident, user/customer paths containing '/' appear first 
-            # and should be ignored so we catch the actual title right before the timestamp.
             non_path_candidates = [c for c in ordered_candidates if '/' not in c]
             if non_path_candidates:
                 title = non_path_candidates[-1]
@@ -477,8 +475,35 @@ def main():
             if not worklog_text:
                 print("Worklog text cannot be empty.")
 
+        # Status selection with '?' option menu
+        status_options = [
+            "In Progress",
+            "Completed (On Hold)",
+            "On Hold"
+        ]
         default_status = "Completed (On Hold)"
-        status = input(f"Status [{default_status}]: ").strip() or default_status
+        status = default_status
+
+        while True:
+            status_input = input(f"Status [? for options] [{default_status}]: ").strip()
+            if status_input == "?":
+                print("\nAvailable Statuses:")
+                print("-" * 25)
+                for idx, opt in enumerate(status_options, 1):
+                    print(f"  [{idx}] {opt}")
+                print("-" * 25)
+                sel = input("Select option number: ").strip()
+                if sel.isdigit() and 1 <= int(sel) <= len(status_options):
+                    status = status_options[int(sel) - 1]
+                    break
+                else:
+                    print("Invalid selection. Try again or enter custom text.")
+            elif not status_input:
+                status = default_status
+                break
+            else:
+                status = status_input
+                break
 
         start_time = input("Start time [Leave unchanged, e.g. 09:00]: ").strip()
         end_time = input("End time [Leave unchanged, e.g. 10:00]: ").strip()
