@@ -195,8 +195,8 @@ def run_halo_automation():
             console.log("Setting Job End: {END_TIME}");
 
             /*
-             * Halo pre-fills time inputs with system clock values (containing a colon ':').
-             * We find inputs containing a colon or fallback to the first text/time inputs.
+             * Target ONLY time inputs (prefilled with system time containing ':') 
+             * while explicitly ignoring date inputs (which contain '-' or '/').
              */
             const timeInputIndexes = await page.locator("input").evaluateAll(inputs => {{
                 const result = [];
@@ -206,7 +206,8 @@ def run_halo_automation():
                     const style = window.getComputedStyle(input);
                     
                     if (style.display !== "none" && style.visibility !== "hidden" && (type === "text" || type === "time")) {{
-                        if (value.includes(":") || result.length < 2) {{
+                        // Must look like a time (has ':') and NOT a date (no '-' or '/')
+                        if (value.includes(":") && !value.includes("-") && !value.includes("/")) {{
                             result.push(index);
                         }}
                     }}
