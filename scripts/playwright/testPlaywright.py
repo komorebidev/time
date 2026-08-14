@@ -34,32 +34,53 @@ if not PLAYWRIGHT_CLI:
         "ERROR: playwright-cli was not found on PATH.",
         file=sys.stderr,
     )
-    print(
-        "Run: python -c "
-        "\"import shutil; print(shutil.which('playwright-cli'))\"",
-        file=sys.stderr,
-    )
     sys.exit(1)
 
 
 # --------------------------------------------------
-# Playwright CLI helper
+# Run Playwright CLI
 # --------------------------------------------------
 
-def pw(*args):
-    """Run a Playwright CLI command against our named session."""
+def run_cli(args):
+    """
+    Run playwright-cli safely on Windows.
 
-    command = [
-        PLAYWRIGHT_CLI,
-        f"-s={SESSION}",
-        *args,
-    ]
+    playwright-cli is installed as a .cmd file through npm,
+    so URLs containing '&' need to be protected from cmd.exe.
+    """
 
-    result = subprocess.run(
-        command,
-        text=True,
-        capture_output=True,
-    )
+    args = [str(arg) for arg in args]
+
+    # Windows .cmd files need cmd.exe.
+    if sys.platform == "win32" and PLAYWRIGHT_CLI.lower().endswith(".cmd"):
+
+        # Quote every argument so cmd.exe doesn't interpret
+        # characters such as &, |, <, >, etc.
+        quoted_args = []
+
+        for arg in args:
+            # Escape embedded double quotes for Windows command-line parsing.
+            escaped = arg.replace('"', '\\"')
+            quoted_args.append(f'"{escaped}"')
+
+        command = (
+            f'"{PLAYWRIGHT_CLI}" '
+            + " ".join(quoted_args)
+        )
+
+        result = subprocess.run(
+            command,
+            shell=True,
+            text=True,
+            capture_output=True,
+        )
+
+    else:
+        result = subprocess.run(
+            [PLAYWRIGHT_CLI, *args],
+            text=True,
+            capture_output=True,
+        )
 
     if result.stdout:
         print(result.stdout)
@@ -69,11 +90,22 @@ def pw(*args):
             print(result.stderr, file=sys.stderr)
 
         raise RuntimeError(
-            f"Playwright CLI command failed:\n"
-            f"{' '.join(command)}"
+            "Playwright CLI command failed:\n"
+            + " ".join(args)
         )
 
     return result.stdout
+
+
+# --------------------------------------------------
+# Playwright helper
+# --------------------------------------------------
+
+def pw(*args):
+    return run_cli([
+        f"-s={SESSION}",
+        *args,
+    ])
 
 
 # --------------------------------------------------
@@ -81,31 +113,14 @@ def pw(*args):
 # --------------------------------------------------
 
 def attach():
+
     print("Attaching to Microsoft Edge...")
 
-    command = [
-        PLAYWRIGHT_CLI,
+    run_cli([
         "attach",
         "--extension=msedge",
         f"-s={SESSION}",
-    ]
-
-    result = subprocess.run(
-        command,
-        text=True,
-        capture_output=True,
-    )
-
-    if result.stdout:
-        print(result.stdout)
-
-    if result.returncode != 0:
-        if result.stderr:
-            print(result.stderr, file=sys.stderr)
-
-        raise RuntimeError(
-            "Could not attach to Microsoft Edge."
-        )
+    ])
 
 
 # --------------------------------------------------
@@ -137,7 +152,7 @@ def main():
     pw("goto", url)
 
     print()
-    print("Taking page snapshot...")
+    print("Taking snapshot...")
 
     pw("snapshot")
 
