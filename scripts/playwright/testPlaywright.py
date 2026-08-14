@@ -1,3 +1,4 @@
+import json
 import os
 import platform
 import shutil
@@ -8,18 +9,8 @@ import textwrap
 import time
 
 BASE_URL = "https://support.eiresystems.com/ticket"
+TICKET_LIST_URL = "https://support.eiresystems.com/tickets?showalltickettypes=1"
 SESSION = "halo"
-
-WORKLOG_TEXT = (
-    "Eire: Email catchup, internal communication, time recording, work logs"
-)
-
-STATUS = "Completed (On Hold)"
-CHARGE_TYPE = "Internal work"
-
-# Hard-coded for this version.
-START_TIME = "09:00"
-END_TIME = "10:00"
 
 
 def find_playwright_cli():
@@ -45,7 +36,6 @@ def run_cli(*args, check=True):
     Run playwright-cli safely across platforms.
     """
     if platform.system() == "Windows":
-        # Quote arguments on Windows so cmd.exe doesn't split on '&' or spaces
         quoted_args = []
         for arg in args:
             s = str(arg)
@@ -122,6 +112,97 @@ def attach():
     time.sleep(1)
 
 
+def get_ticket_number():
+    """
+    Allows the user to choose between fetching assigned/recent tickets from the browser
+    or typing a ticket number manually.
+    """
+    print("\n--- Ticket Selection Method ---")
+    print("[1] Fetch recent/assigned tickets from Halo view")
+    print("[2] Type ticket number manually")
+    method = input("Select option [1 or 2]: ").strip()
+
+    if method == "2":
+        manual_id = input("Enter ticket number manually: ").strip()
+        return manual_id
+
+    # Default option 1: Fetch from page
+    print("\nFetching your tickets from HaloPSA...")
+    
+    js_code = textwrap.dedent(
+        """
+        async page => {
+            await page.goto("https://support.eiresystems.com/tickets?showalltickettypes=1");
+            await page.waitForTimeout(3000);
+
+            const tickets = await page.evaluate(() => {
+                const results = [];
+                const links = document.querySelectorAll('a[href*="ticket?id="]');
+                links.forEach(link => {
+                    const href = link.getAttribute('href');
+                    const match = href.match(/id=(\\d+)/);
+                    if (match) {
+                        const id = match[1];
+                        const title = link.innerText.trim();
+                        if (!results.some(r => r.id === id) && title) {
+                            results.push({ id: id, title: title });
+                        }
+                    }
+                });
+                return results.slice(0, 15);
+            });
+
+            console.log("FETCHED_TICKETS_JSON:" + JSON.stringify(tickets));
+        }
+        """
+    )
+
+    temp_path = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            mode="w", suffix=".js", prefix="halo_fetch_", delete=False, encoding="utf-8"
+        ) as temp_file:
+            temp_file.write(js_code)
+            temp_path = temp_file.name
+
+        output = run_cli("run-code", f"--filename={temp_path}")
+        
+        tickets = []
+        for line in output.splitlines():
+            if "FETCHED_TICKETS_JSON:" in line:
+                json_str = line.split("FETCHED_TICKETS_JSON:")[1].strip()
+                tickets = json.loads(json_str)
+                break
+
+        if not tickets:
+            print("\nCould not automatically fetch tickets from the page view.")
+            return input("Enter ticket number manually: ").strip()
+
+        print("\n--- Available Tickets ---")
+        for idx, t in enumerate(tickets, 1):
+            print(f"[{idx}] ID: {t['id']} - {t['title'][:60]}")
+        print("[0] Type custom ticket ID manually")
+        print("-------------------------")
+
+        choice = input("Select a ticket number from the list (or 0 for manual): ").strip()
+        
+        if choice.isdigit():
+            c_int = int(choice)
+            if 1 <= c_int <= len(tickets):
+                selected_id = tickets[c_int - 1]['id']
+                print(f"Selected Ticket: {selected_id}")
+                return selected_id
+
+        return input("Enter ticket number manually: ").strip()
+
+    finally:
+        if temp_path and os.path.exists(temp_path):
+            try:
+                os.remove(temp_path)
+            except OSError:
+                pass
+
+
 def goto_ticket(ticket):
     """
     Navigate to the requested Halo ticket.
@@ -133,10 +214,13 @@ def goto_ticket(ticket):
     time.sleep(1)
 
 
-def run_halo_automation():
+def run_halo_automation(worklog_text, status, start_time, end_time, charge_type):
     """
     Run the actual HaloPSA Worklog automation using Playwright code.
     """
+    start_fill_code = f'await allInputs.nth(timeInputIndexes[0]).fill({start_time!r});' if start_time else '// Start time left unchanged'
+    end_fill_code = f'await allInputs.nth(timeInputIndexes[1]).fill({end_time!r});' if end_time else '// End time left unchanged'
+
     js_code = textwrap.dedent(
         f"""
         async page => {{
@@ -147,7 +231,6 @@ def run_halo_automation():
                 name: "Worklog"
             }}).click();
 
-            // Give the modal and system clock default values time to render
             await page.waitForTimeout(1500);
 
             // ---------------------------------------------------------
@@ -166,24 +249,24 @@ def run_halo_automation():
             }});
 
             await editor.fill(
-                {WORKLOG_TEXT!r}
+                {worklog_text!r}
             );
 
             // ---------------------------------------------------------
             // STATUS
             // ---------------------------------------------------------
 
-            console.log("Setting status: {STATUS}");
+            console.log("Setting status: {status}");
 
-            const status = page.getByRole(
+            const statusCombobox = page.getByRole(
                 "combobox",
                 {{ name: "Status *" }}
             );
 
-            await status.click();
+            await statusCombobox.click();
 
             await page.getByText(
-                {STATUS!r},
+                {status!r},
                 {{ exact: true }}
             ).click();
 
@@ -191,13 +274,9 @@ def run_halo_automation():
             // JOB START / END TIMES
             // ---------------------------------------------------------
 
-            console.log("Setting Job Start: {START_TIME}");
-            console.log("Setting Job End: {END_TIME}");
+            console.log("Job Start Time input: {start_time if start_time else '(Leave unchanged)'}");
+            console.log("Job End Time input: {end_time if end_time else '(Leave unchanged)'}");
 
-            /*
-             * Target ONLY time inputs (prefilled with system time containing ':') 
-             * while explicitly ignoring date inputs (which contain '-' or '/').
-             */
             const timeInputIndexes = await page.locator("input").evaluateAll(inputs => {{
                 const result = [];
                 inputs.forEach((input, index) => {{
@@ -206,7 +285,6 @@ def run_halo_automation():
                     const style = window.getComputedStyle(input);
                     
                     if (style.display !== "none" && style.visibility !== "hidden" && (type === "text" || type === "time")) {{
-                        // Must look like a time (has ':') and NOT a date (no '-' or '/')
                         if (value.includes(":") && !value.includes("-") && !value.includes("/")) {{
                             result.push(index);
                         }}
@@ -225,31 +303,26 @@ def run_halo_automation():
 
             const allInputs = page.locator("input");
 
-            await allInputs
-                .nth(timeInputIndexes[0])
-                .fill("{START_TIME}");
-
-            await allInputs
-                .nth(timeInputIndexes[1])
-                .fill("{END_TIME}");
+            {start_fill_code}
+            {end_fill_code}
 
             // ---------------------------------------------------------
             // CHARGE TYPE
             // ---------------------------------------------------------
 
             console.log(
-                "Setting charge type: {CHARGE_TYPE}"
+                "Setting charge type: {charge_type}"
             );
 
-            const chargeType = page.getByRole(
+            const chargeTypeCombobox = page.getByRole(
                 "combobox",
                 {{ name: "Charge Type *" }}
             );
 
-            await chargeType.click();
+            await chargeTypeCombobox.click();
 
             await page.getByText(
-                {CHARGE_TYPE!r},
+                {charge_type!r},
                 {{ exact: true }}
             ).click();
 
@@ -318,16 +391,31 @@ def main():
     print("HaloPSA Worklog Automation")
     print("==========================")
 
-    ticket = input("Ticket number: ").strip()
-
-    if not ticket.isdigit():
-        print("Invalid ticket number.")
-        return
-
     try:
         attach()
+
+        ticket = get_ticket_number()
+        if not ticket or not ticket.isdigit():
+            print("Invalid ticket number.")
+            return
+
+        worklog_text = ""
+        while not worklog_text:
+            worklog_text = input("Worklog text (Required): ").strip()
+            if not worklog_text:
+                print("Worklog text cannot be empty.")
+
+        default_status = "Completed (On Hold)"
+        status = input(f"Status [{default_status}]: ").strip() or default_status
+
+        start_time = input("Start time [Leave unchanged, e.g. 09:00]: ").strip()
+        end_time = input("End time [Leave unchanged, e.g. 10:00]: ").strip()
+
+        default_charge = "Internal work"
+        charge_type = input(f"Charge type [{default_charge}]: ").strip() or default_charge
+
         goto_ticket(ticket)
-        run_halo_automation()
+        run_halo_automation(worklog_text, status, start_time, end_time, charge_type)
         take_snapshot()
 
         print()
