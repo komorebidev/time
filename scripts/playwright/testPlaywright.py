@@ -147,7 +147,8 @@ def run_halo_automation():
                 name: "Worklog"
             }}).click();
 
-            await page.waitForTimeout(750);
+            // Give the modal and system clock default values time to render
+            await page.waitForTimeout(1500);
 
             // ---------------------------------------------------------
             // WORKLOG TEXT
@@ -190,49 +191,34 @@ def run_halo_automation():
             // JOB START / END TIMES
             // ---------------------------------------------------------
 
-            console.log(
-                "Setting Job Start: {START_TIME}"
-            );
+            console.log("Setting Job Start: {START_TIME}");
+            console.log("Setting Job End: {END_TIME}");
 
-            console.log(
-                "Setting Job End: {END_TIME}"
-            );
-
-            const timeInputIndexes = await page.locator(
-                "input"
-            ).evaluateAll(inputs => {{
-
+            /*
+             * Halo pre-fills time inputs with system clock values (containing a colon ':').
+             * We find inputs containing a colon or fallback to the first text/time inputs.
+             */
+            const timeInputIndexes = await page.locator("input").evaluateAll(inputs => {{
                 const result = [];
-
                 inputs.forEach((input, index) => {{
-
                     const value = input.value || "";
-                    const type = (
-                        input.getAttribute("type") || "text"
-                    ).toLowerCase();
-
-                    if (
-                        (type === "text" || type === "time") &&
-                        /^\\\\d{{1,2}}:\\\\d{{2}}$/.test(value)
-                    ) {{
-                        result.push(index);
+                    const type = (input.getAttribute("type") || "text").toLowerCase();
+                    const style = window.getComputedStyle(input);
+                    
+                    if (style.display !== "none" && style.visibility !== "hidden" && (type === "text" || type === "time")) {{
+                        if (value.includes(":") || result.length < 2) {{
+                            result.push(index);
+                        }}
                     }}
-
                 }});
-
                 return result;
             }});
 
-            console.log(
-                "Time inputs found:",
-                timeInputIndexes
-            );
+            console.log("Time input indices found:", timeInputIndexes);
 
             if (timeInputIndexes.length < 2) {{
                 throw new Error(
-                    "Could not find the two Halo Worklog time inputs."
-                    + " Found "
-                    + timeInputIndexes.length
+                    "Could not find the two Halo Worklog time inputs. Found " + timeInputIndexes.length
                 );
             }}
 
