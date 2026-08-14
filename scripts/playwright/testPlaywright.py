@@ -1,175 +1,255 @@
-import os
 import shutil
 import subprocess
 import sys
 import time
 
 
-# ============================================================
-# Configuration
-# ============================================================
-
 BASE_URL = "https://support.eiresystems.com/ticket"
 
 SESSION = "halo"
 
 WORKLOG_TEXT = (
-    "Eire: Email catchup, internal communication, "
-    "time recording, work logs"
+    "Eire: Email catchup, internal communication, time recording, work logs"
 )
 
 STATUS = "Completed (On Hold)"
 CHARGE_TYPE = "Internal work"
 
-# Hard-coded for this version
+# Hard-coded for this version.
 START_TIME = "09:00"
 END_TIME = "10:00"
 
 
-# ============================================================
-# Find playwright-cli
-# ============================================================
+def find_cli():
+    """Find playwright-cli without hard-coding the Windows username."""
 
-def find_playwright_cli():
     cli = shutil.which("playwright-cli")
 
     if cli:
         return cli
 
-    appdata = os.environ.get("APPDATA")
+    cli = shutil.which("playwright-cli.cmd")
 
-    if appdata:
-        candidates = [
-            os.path.join(appdata, "npm", "playwright-cli.cmd"),
-            os.path.join(appdata, "npm", "playwright-cli.CMD"),
-            os.path.join(appdata, "npm", "playwright-cli"),
-        ]
-
-        for candidate in candidates:
-            if os.path.isfile(candidate):
-                return candidate
+    if cli:
+        return cli
 
     raise FileNotFoundError(
-        "Could not find playwright-cli."
+        "playwright-cli was not found in PATH."
     )
 
 
-PLAYWRIGHT_CLI = find_playwright_cli()
+CLI = find_cli()
 
-
-# ============================================================
-# Run playwright-cli
-# ============================================================
 
 def pw(*args, check=True):
     """
-    Run playwright-cli directly.
+    Run:
 
-    subprocess.run() passes each argument separately, so URLs
-    containing '&' do not need shell escaping.
+        playwright-cli --s=halo <command> ...
+
+    directly.
+
+    Using a list of arguments is important because the ticket URL
+    contains '&'.
     """
 
     command = [
-        PLAYWRIGHT_CLI,
+        CLI,
         f"--s={SESSION}",
-        *args,
+        *[str(arg) for arg in args],
     ]
 
-    print(
-        ">",
-        " ".join(
-            f'"{arg}"' if any(c in arg for c in " &")
-            else arg
-            for arg in command
-        )
-    )
+    print()
+    print("> " + " ".join(command))
 
     result = subprocess.run(
         command,
         stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
         text=True,
         encoding="utf-8",
         errors="replace",
-        shell=False,
     )
 
     if result.stdout:
         print(result.stdout)
 
-    if result.stderr:
-        print(result.stderr, file=sys.stderr)
-
     if check and result.returncode != 0:
         raise RuntimeError(
-            "Playwright CLI command failed:\n"
-            + " ".join(command)
-            + f"\n\nExit code: {result.returncode}"
+            f"Playwright CLI command failed:\n"
+            f"{' '.join(command)}\n"
+            f"Exit code: {result.returncode}"
         )
 
-    return result
+    return result.stdout
 
-
-# ============================================================
-# Attach to Microsoft Edge
-# ============================================================
 
 def attach():
     print("Attaching to Microsoft Edge...")
 
-    command = [
-        PLAYWRIGHT_CLI,
-        "attach",
-        "--extension=msedge",
-        f"--session={SESSION}",
-    ]
-
-    result = subprocess.run(
-        command,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        text=True,
-        encoding="utf-8",
-        errors="replace",
-        shell=False,
-    )
-
-    if result.stdout:
-        print(result.stdout)
-
-    if result.stderr:
-        print(result.stderr, file=sys.stderr)
-
-    if result.returncode != 0:
-        raise RuntimeError(
-            "Could not attach to Microsoft Edge.\n\n"
-            + result.stdout
-            + "\n"
-            + result.stderr
-        )
+    pw("attach")
 
     time.sleep(1)
 
 
-# ============================================================
-# Main
-# ============================================================
+def goto_ticket(ticket):
+    url = (
+        f"{BASE_URL}"
+        f"?id={ticket}"
+        f"&showalltickettypes=1"
+    )
+
+    print(f"\nOpening ticket {ticket}...")
+
+    pw("goto", url)
+
+    time.sleep(1)
+
+
+def open_worklog():
+    print("\nOpening Worklog...")
+
+    pw("click", "button", "Worklog")
+
+    time.sleep(1)
+
+
+def enter_worklog():
+    print("\nEntering worklog...")
+
+    pw(
+        "fill",
+        '[contenteditable="true"]',
+        WORKLOG_TEXT,
+    )
+
+
+def set_status():
+    print(f"\nSetting status: {STATUS}")
+
+    pw(
+        "click",
+        "combobox",
+        "Status *",
+    )
+
+    time.sleep(0.5)
+
+    pw(
+        "click",
+        "text",
+        STATUS,
+    )
+
+
+def set_times():
+    """
+    Set the two time fields.
+
+    From the snapshot, the Worklog contains:
+
+        Job Start
+            Date textbox
+            time textbox
+
+        Job End
+            Date textbox
+            time textbox
+
+    The date fields have the accessible name "Date", while the
+    time fields do not.
+
+    Therefore we locate the text inputs and use the two time
+    inputs associated with the Worklog form.
+    """
+
+    print(f"\nSetting Job Start: {START_TIME}")
+    print(f"Setting Job End:   {END_TIME}")
+
+    # First try the two time inputs using their current values.
+    #
+    # This is intentionally done with JavaScript through the CLI
+    # rather than guessing at generated ref IDs.
+
+    script = f"""
+    const inputs = [...document.querySelectorAll('input')];
+
+    const timeInputs = inputs.filter(input => {{
+        const value = input.value || '';
+        const type = (input.type || '').toLowerCase();
+
+        return (
+            type === 'text' &&
+            /^\\d{{1,2}}:\\d{{2}}$/.test(value)
+        );
+    }});
+
+    if (timeInputs.length < 2) {{
+        throw new Error(
+            'Could not find the two Worklog time inputs. Found: '
+            + timeInputs.length
+        );
+    }}
+
+    timeInputs[0].value = '{START_TIME}';
+    timeInputs[0].dispatchEvent(
+        new Event('input', {{ bubbles: true }})
+    );
+    timeInputs[0].dispatchEvent(
+        new Event('change', {{ bubbles: true }})
+    );
+
+    timeInputs[1].value = '{END_TIME}';
+    timeInputs[1].dispatchEvent(
+        new Event('input', {{ bubbles: true }})
+    );
+    timeInputs[1].dispatchEvent(
+        new Event('change', {{ bubbles: true }})
+    );
+    """
+
+    pw("eval", script)
+
+
+def set_charge_type():
+    print(f"\nSetting charge type: {CHARGE_TYPE}")
+
+    pw(
+        "click",
+        "combobox",
+        "Charge Type *",
+    )
+
+    time.sleep(0.5)
+
+    pw(
+        "click",
+        "text",
+        CHARGE_TYPE,
+    )
+
+
+def take_snapshot():
+    print("\nTaking final snapshot...")
+
+    pw("snapshot")
+
+
+def save():
+    print("\nSaving worklog...")
+
+    pw(
+        "click",
+        "button",
+        "Save",
+    )
+
+    time.sleep(2)
+
 
 def main():
-
-    print()
-    print(f"Using playwright-cli: {PLAYWRIGHT_CLI}")
-    print()
-
-    # --------------------------------------------------------
-    # Attach to existing Edge
-    # --------------------------------------------------------
-
-    attach()
-
-    # --------------------------------------------------------
-    # Ask for ticket
-    # --------------------------------------------------------
+    print("HaloPSA Worklog Automation")
+    print("==========================")
 
     ticket = input("Ticket number: ").strip()
 
@@ -177,166 +257,34 @@ def main():
         print("Invalid ticket number.")
         return
 
-    url = f"{BASE_URL}?id={ticket}&showalltickettypes=1"
+    try:
+        attach()
 
-    # --------------------------------------------------------
-    # Open ticket
-    # --------------------------------------------------------
+        goto_ticket(ticket)
 
-    print()
-    print(f"Opening ticket {ticket}...")
+        print("\nTicket opened.")
 
-    pw("goto", url)
+        open_worklog()
 
-    # --------------------------------------------------------
-    # Snapshot
-    # --------------------------------------------------------
+        enter_worklog()
 
-    print()
-    print("Taking ticket snapshot...")
+        set_status()
 
-    pw("snapshot")
+        set_times()
 
-    # --------------------------------------------------------
-    # Open Worklog
-    # --------------------------------------------------------
+        set_charge_type()
 
-    print()
-    print("Opening Worklog...")
+        take_snapshot()
 
-    pw(
-        "click",
-        "getByRole('button', { name: 'Worklog' })"
-    )
+        save()
 
-    time.sleep(1)
+        print("\nDone.")
 
-    # --------------------------------------------------------
-    # Snapshot Worklog
-    # --------------------------------------------------------
+    except Exception as exc:
+        print("\nERROR:")
+        print(exc)
+        sys.exit(1)
 
-    print()
-    print("Taking Worklog snapshot...")
-
-    pw("snapshot")
-
-    # --------------------------------------------------------
-    # Enter Worklog
-    # --------------------------------------------------------
-
-    print()
-    print("Entering worklog...")
-
-    pw(
-        "fill",
-        "locator('[contenteditable=\"true\"]').first()",
-        WORKLOG_TEXT,
-    )
-
-    # --------------------------------------------------------
-    # Set Status
-    # --------------------------------------------------------
-
-    print()
-    print(f"Setting status: {STATUS}")
-
-    pw(
-        "select",
-        "getByRole('combobox', { name: 'Status *' })",
-        STATUS,
-    )
-
-    # --------------------------------------------------------
-    # Set Start Time
-    # --------------------------------------------------------
-
-    print()
-    print(f"Setting start time: {START_TIME}")
-
-    pw(
-        "fill",
-        "getByRole('textbox').nth(2)",
-        START_TIME,
-    )
-
-    # --------------------------------------------------------
-    # Set End Time
-    # --------------------------------------------------------
-
-    print()
-    print(f"Setting end time: {END_TIME}")
-
-    pw(
-        "fill",
-        "getByRole('textbox').nth(4)",
-        END_TIME,
-    )
-
-    # --------------------------------------------------------
-    # Set Charge Type
-    # --------------------------------------------------------
-
-    print()
-    print(f"Setting charge type: {CHARGE_TYPE}")
-
-    pw(
-        "select",
-        "getByRole('combobox', { name: 'Charge Type *' })",
-        CHARGE_TYPE,
-    )
-
-    # --------------------------------------------------------
-    # Final snapshot
-    # --------------------------------------------------------
-
-    print()
-    print("Final snapshot before Save...")
-
-    pw("snapshot")
-
-    # --------------------------------------------------------
-    # Save
-    # --------------------------------------------------------
-
-    print()
-    print("Saving Worklog...")
-
-    pw(
-        "click",
-        "getByRole('button', { name: 'Save' })",
-    )
-
-    time.sleep(1)
-
-    # --------------------------------------------------------
-    # Verify
-    # --------------------------------------------------------
-
-    print()
-    print("Verifying result...")
-
-    pw("snapshot")
-
-    print()
-    print("========================================")
-    print("Worklog automation complete.")
-    print("========================================")
-
-
-# ============================================================
-# Entry point
-# ============================================================
 
 if __name__ == "__main__":
-    try:
-        main()
-
-    except KeyboardInterrupt:
-        print()
-        print("Cancelled.")
-
-    except Exception as e:
-        print()
-        print("ERROR:")
-        print(e)
-        sys.exit(1)
+    main()
