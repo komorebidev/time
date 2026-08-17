@@ -241,6 +241,17 @@ def run_halo_automation(worklog_text, status, start_time, end_time, charge_type)
     """
     Run the actual HaloPSA Worklog automation using Playwright code with robust dropdown and submit handling.
     """
+    start_fill_code = (
+        f"await allInputs.nth(targetStartIdx).fill({start_time!r});"
+        if start_time
+        else "/* keeping default/empty start time */"
+    )
+    end_fill_code = (
+        f"await allInputs.nth(targetEndIdx).fill({end_time!r});"
+        if end_time
+        else "/* keeping default/empty end time */"
+    )
+
     js_code = textwrap.dedent(
         f"""
         async page => {{
@@ -294,94 +305,76 @@ def run_halo_automation(worklog_text, status, start_time, end_time, charge_type)
             }}
 
             // ---------------------------------------------------------
-            // JOB START / END TIMES (LABEL-BASED PRECISION)
+            // JOB START / END TIMES & SYSTEM CLOCK CHECK
             // ---------------------------------------------------------
 
-            console.log("Job Start Time input: {start_time if start_time else '(Cleared / Empty)'}");
-            console.log("Job End Time input: {end_time if end_time else '(Cleared / Empty)'}");
+            console.log("Job Start Time input: {start_time if start_time else '(Default / Unchanged)'}");
+            console.log("Job End Time input: {end_time if end_time else '(Default / Unchanged)'}");
 
-            async function setTimeInputByLabel(labelText, timeStr) {{
-                const inputLocator = page.locator(`text=${{labelText}}`).locator('xpath=..').locator('input').first();
-                if (await inputLocator.count() > 0) {{
-                    await inputLocator.click();
-                    await page.waitForTimeout(300);
-                    await inputLocator.evaluate(el => {{
-                        el.focus();
-                        el.value = "";
-                        el.dispatchEvent(new Event("input", {{ bubbles: true }}));
-                        el.dispatchEvent(new Event("change", {{ bubbles: true }}));
-                    }});
-                    if (timeStr) {{
-                        await inputLocator.fill(timeStr);
-                        await page.waitForTimeout(200);
-                        await inputLocator.evaluate((el, val) => {{
-                            el.value = val;
-                            el.dispatchEvent(new Event("input", {{ bubbles: true }}));
-                            el.dispatchEvent(new Event("change", {{ bubbles: true }}));
-                            el.dispatchEvent(new Event("blur", {{ bubbles: true }}));
-                        }}, timeStr);
-                    }}
-                }} else {{
-                    console.log(`Could not find input for label: ${{labelText}}`);
-                }}
-            }}
-
-            // Fallback index-based setter if label lookup fails
-            async function setTimeInputByIndex(indexFromEnd, timeStr) {{
-                const timeInputIndexes = await page.locator("input").evaluateAll(inputs => {{
-                    const result = [];
-                    inputs.forEach((input, index) => {{
-                        const type = (input.getAttribute("type") || "text").toLowerCase();
-                        const style = window.getComputedStyle(input);
-                        const rect = input.getBoundingClientRect();
-                        if (style.display !== "none" && style.visibility !== "hidden" && rect.width > 0 && (type === "text" || type === "time")) {{
-                            const placeholder = (input.getAttribute("placeholder") || "").toLowerCase();
-                            const ariaLabel = (input.getAttribute("aria-label") || "").toLowerCase();
-                            if (!placeholder.includes("search") && !ariaLabel.includes("search")) {{
-                                result.push(index);
-                            }}
+            const timeInputIndexes = await page.locator("input").evaluateAll(inputs => {{
+                const result = [];
+                inputs.forEach((input, index) => {{
+                    const type = (input.getAttribute("type") || "text").toLowerCase();
+                    const style = window.getComputedStyle(input);
+                    const rect = input.getBoundingClientRect();
+                    if (style.display !== "none" && style.visibility !== "hidden" && rect.width > 0 && (type === "text" || type === "time")) {{
+                        const placeholder = (input.getAttribute("placeholder") || "").toLowerCase();
+                        const ariaLabel = (input.getAttribute("aria-label") || "").toLowerCase();
+                        const className = (input.className || "").toLowerCase();
+                        if (!placeholder.includes("search") && !ariaLabel.includes("search") && !className.includes("select__input")) {{
+                            result.push(index);
                         }}
-                    }});
-                    return result;
-                }});
-
-                if (timeInputIndexes.length >= 2) {{
-                    const allInputs = page.locator("input");
-                    const targetIdx = timeInputIndexes[timeInputIndexes.length - indexFromEnd];
-                    const locator = allInputs.nth(targetIdx);
-                    await locator.click();
-                    await page.waitForTimeout(300);
-                    await locator.evaluate(el => {{
-                        el.focus();
-                        el.value = "";
-                        el.dispatchEvent(new Event("input", {{ bubbles: true }}));
-                        el.dispatchEvent(new Event("change", {{ bubbles: true }}));
-                    }});
-                    if (timeStr) {{
-                        await locator.fill(timeStr);
-                        await page.waitForTimeout(200);
-                        await locator.evaluate((el, val) => {{
-                            el.value = val;
-                            el.dispatchEvent(new Event("input", {{ bubbles: true }}));
-                            el.dispatchEvent(new Event("change", {{ bubbles: true }}));
-                            el.dispatchEvent(new Event("blur", {{ bubbles: true }}));
-                        }}, timeStr);
                     }}
-                }}
+                }});
+                return result;
+            }});
+
+            console.log("Qualified input indices found:", timeInputIndexes);
+
+            if (timeInputIndexes.length < 2) {{
+                throw new Error(
+                    "Could not find the two Halo Worklog time inputs. Found " + timeInputIndexes.length
+                );
             }}
 
-            // Try setting Job Start Time first, then Job End Time
-            try {{
-                await setTimeInputByLabel("Job Start", {start_time!r});
-            }} catch (e) {{
-                await setTimeInputByIndex(2, {start_time!r});
+            const allInputs = page.locator("input");
+            const targetStartIdx = timeInputIndexes[timeInputIndexes.length - 2];
+            const targetEndIdx = timeInputIndexes[timeInputIndexes.length - 1];
+
+            console.log("Using input indices for Start/End:", targetStartIdx, targetEndIdx);
+
+            // Check if system clock matches the page's default job start and end times
+            const now = new Date();
+            const currentSystemHours = String(now.getHours()).padStart(2, '0');
+            const currentSystemMinutes = String(now.getMinutes()).padStart(2, '0');
+            const expectedSystemTime = currentSystemHours + ":" + currentSystemMinutes;
+
+            const pageStartTime = await allInputs.nth(targetStartIdx).inputValue();
+            const pageEndTime = await allInputs.nth(targetEndIdx).inputValue();
+
+            console.log("System clock time:", expectedSystemTime);
+            console.log("Page start time field:", pageStartTime);
+            console.log("Page end time field:", pageEndTime);
+
+            const startMinutesDiff = pageStartTime ? Math.abs(parseInt(pageStartTime.split(':')[0]) * 60 + parseInt(pageStartTime.split(':')[1]) - (now.getHours() * 60 + now.getMinutes())) : 999;
+            const endMinutesDiff = pageEndTime ? Math.abs(parseInt(pageEndTime.split(':')[0]) * 60 + parseInt(pageEndTime.split(':')[1]) - (now.getHours() * 60 + now.getMinutes())) : 999;
+
+            if (startMinutesDiff > 5 || endMinutesDiff > 5) {{
+                console.log("System clock does not match page job start/end times. Refreshing page...");
+                await page.reload();
+                throw new Error("PAGE_REFRESH_REQUIRED");
             }}
 
-            try {{
-                await setTimeInputByLabel("Job End", {end_time!r});
-            }} catch (e) {{
-                await setTimeInputByIndex(1, {end_time!r});
-            }}
+            {start_fill_code}
+            {end_fill_code}
+
+            // Ensure any accidentally opened calendar overlays are closed
+            await page.keyboard.press("Escape");
+            await page.waitForTimeout(500);
+            await page.evaluate(() => {{
+                document.body.click();
+            }});
+            await page.waitForTimeout(500);
 
             // ---------------------------------------------------------
             // CHARGE TYPE (REACT-SELECT COMPATIBLE)
@@ -485,10 +478,22 @@ def run_halo_automation(worklog_text, status, start_time, end_time, charge_type)
 
         print("\nRunning Halo automation...")
 
-        run_cli(
-            "run-code",
-            f"--filename={temp_path}",
-        )
+        try:
+            run_cli(
+                "run-code",
+                f"--filename={temp_path}",
+            )
+        except RuntimeError as e:
+            if "PAGE_REFRESH_REQUIRED" in str(e):
+                print("\nDetected mismatched time inputs. Refreshing page and retrying automation...")
+                goto_ticket(ticket_global_ref)
+                time.sleep(2)
+                run_cli(
+                    "run-code",
+                    f"--filename={temp_path}",
+                )
+            else:
+                raise
 
     finally:
         if temp_path and os.path.exists(temp_path):
@@ -545,14 +550,11 @@ def get_worklog_details(default_status, default_charge):
             status = status_input
             break
 
-    default_start = "09:00"
-    default_end = "10:00"
+    start_input = input("Start time [Leave empty to keep system clock default]: ").strip()
+    start_time = start_input if start_input else ""
 
-    start_input = input(f"Start time [Leave unchanged, e.g. {default_start}] [{default_start}]: ").strip()
-    start_time = default_start if not start_input else start_input
-
-    end_input = input(f"End time [Leave unchanged, e.g. {default_end}] [{default_end}]: ").strip()
-    end_time = default_end if not end_input else end_input
+    end_input = input("End time [Leave empty to keep system clock default]: ").strip()
+    end_time = end_input if end_input else ""
 
     # Charge type selection with '?' option menu
     charge_options = [
@@ -658,7 +660,12 @@ def select_ticket():
     return ticket, is_ohayou
 
 
+# Global reference for page retries
+ticket_global_ref = None
+
+
 def main():
+    global ticket_global_ref
     print()
     print("HaloPSA Worklog Automation")
     print("==========================")
@@ -675,6 +682,7 @@ def main():
 
         while True:
             ticket, is_ohayou = select_ticket()
+            ticket_global_ref = ticket
             goto_ticket(ticket)
 
             # Main worklog entry loop (supports multiple notes on the same ticket)
@@ -687,7 +695,7 @@ def main():
                     start_time = ohayou_start_time
                     end_time = ohayou_end_time
                     charge_type = default_charge
-                    print(f"Using おはよう defaults:\n  - Worklog: {worklog_text}\n  - Status: {status}\n  - Start Time: {start_time if start_time else '(Empty)'}\n  - End Time: {end_time if end_time else '(Empty)'}\n  - Charge Type: {charge_type}")
+                    print(f"Using おはよう defaults:\n  - Worklog: {worklog_text}\n  - Status: {status}\n  - Start Time: (System Default)\n  - End Time: (System Default)\n  - Charge Type: {charge_type}")
                 else:
                     worklog_text, status, start_time, end_time, charge_type = get_worklog_details(default_status, default_charge)
                 
@@ -696,6 +704,10 @@ def main():
                 # Ask if user wants to add another note for this ticket
                 add_more = input("\nDo you want to create another worklog entry for this ticket? (y/N): ").strip().lower()
                 if add_more == 'y':
+                    # Refresh page before creating additional worklog entries on the same ticket
+                    print("\nRefreshing ticket page before adding another worklog entry...")
+                    goto_ticket(ticket)
+                    
                     # If it was おはよう (option 3), change is_ohayou to False for subsequent notes
                     # so it prompts the user normally for details instead of infinitely looping the same おはよう note.
                     is_ohayou = False
