@@ -241,14 +241,14 @@ def run_halo_automation(worklog_text, status, start_time, end_time, charge_type)
     Run the actual HaloPSA Worklog automation using Playwright code with robust dropdown and submit handling.
     """
     start_fill_code = (
-        f"await allInputs.nth(timeInputIndexes[0]).fill({start_time!r});"
+        f"await timeInputs.nth(0).fill({start_time!r});"
         if start_time
-        else "// Start time left unchanged"
+        else "await timeInputs.nth(0).fill('');"
     )
     end_fill_code = (
-        f"await allInputs.nth(timeInputIndexes[1]).fill({end_time!r});"
+        f"await timeInputs.nth(1).fill({end_time!r});"
         if end_time
-        else "// End time left unchanged"
+        else "await timeInputs.nth(1).fill('');"
     )
 
     js_code = textwrap.dedent(
@@ -307,37 +307,80 @@ def run_halo_automation(worklog_text, status, start_time, end_time, charge_type)
             // JOB START / END TIMES
             // ---------------------------------------------------------
 
-            console.log("Job Start Time input: {start_time if start_time else '(Leave unchanged)'}");
-            console.log("Job End Time input: {end_time if end_time else '(Leave unchanged)'}");
+            console.log("Job Start Time input: {start_time if start_time else '(Cleared / Empty)'}");
+            console.log("Job End Time input: {end_time if end_time else '(Cleared / Empty)'}");
 
-            const timeInputIndexes = await page.locator("input").evaluateAll(inputs => {{
+            // Locate time/text inputs inside the active modal/form container
+            const timeInputs = page.locator(".modal input[type='text'], .modal input[type='time'], form input[type='text'], form input[type='time']").filter({
+                hasNot: page.locator("[type='hidden'], [disabled]")
+            });
+
+            // Fallback to searching all inputs if modal/form scope returns too few
+            let count = await timeInputs.count();
+            if (count < 2) {{
+                console.log("Fallback: searching all inputs...");
+                const allVisibleInputs = page.locator("input").evaluateAll(inputs => {{
+                    return inputs.map((input, index) => {{
+                        const type = (input.getAttribute("type") || "text").toLowerCase();
+                        const style = window.getComputedStyle(input);
+                        const isVisible = style.display !== "none" && style.visibility !== "hidden" && input.offsetParent !== null;
+                        return (isVisible && (type === "text" || type === "time")) ? index : -1;
+                    }}).filter(idx => idx !== -1);
+                }});
+                // We pick the relevant time fields (usually preceding or succeeding specific labels)
+            }}
+
+            // More reliable selector approach targeting time inputs by their placeholder or surrounding labels
+            const startTimeInput = page.locator("input[placeholder*='hh:mm'], input[placeholder*='HH:MM'], input[placeholder*='00:00']").first();
+            
+            // Let's use a robust evaluate selector to find the two sequential time text inputs in the active worklog popup
+            const timeInputIndexes = await page.evaluateAll ? await page.locator("input").evaluateAll(inputs => {{
                 const result = [];
                 inputs.forEach((input, index) => {{
-                    const value = input.value || "";
                     const type = (input.getAttribute("type") || "text").toLowerCase();
                     const style = window.getComputedStyle(input);
-                    
-                    if (style.display !== "none" && style.visibility !== "hidden" && (type === "text" || type === "time")) {{
-                        if (value.includes(":") && !value.includes("-") && !value.includes("/")) {{
+                    const rect = input.getBoundingClientRect();
+                    // Visible inputs with reasonable dimensions
+                    if (style.display !== "none" && style.visibility !== "hidden" && rect.width > 0 && (type === "text" || type === "time")) {{
+                        // Exclude search inputs or dropdown filters
+                        const placeholder = (input.getAttribute("placeholder") || "").toLowerCase();
+                        const ariaLabel = (input.getAttribute("aria-label") || "").toLowerCase();
+                        if (!placeholder.includes("search") && !ariaLabel.includes("search")) {{
                             result.push(index);
                         }}
                     }}
                 }});
                 return result;
-            }});
+            }}) : [];
 
-            console.log("Time input indices found:", timeInputIndexes);
-
-            if (timeInputIndexes.length < 2) {{
-                throw new Error(
-                    "Could not find the two Halo Worklog time inputs. Found " + timeInputIndexes.length
-                );
-            }}
+            console.log("Qualified input indices found:", timeInputIndexes);
 
             const allInputs = page.locator("input");
+            
+            // If we found the time inputs correctly via index filtering:
+            if (timeInputIndexes.length >= 2) {{
+                // Usually start time and end time are consecutive inputs near the middle/top of the form
+                // Let's pick the specific ones by matching their associated label text if possible, or use the last two/first two text inputs
+                const targetStartIdx = timeInputIndexes[timeInputIndexes.length - 2];
+                const targetEndIdx = timeInputIndexes[timeInputIndexes.length - 1];
 
-            {start_fill_code}
-            {end_fill_code}
+                console.log("Using input indices for Start/End:", targetStartIdx, targetEndIdx);
+
+                if ({start_time!r}) {{
+                    await allInputs.nth(targetStartIdx).fill({start_time!r});
+                }} else {{
+                    await allInputs.nth(targetStartIdx).fill('');
+                }}
+
+                if ({end_time!r}) {{
+                    await allInputs.nth(targetEndIdx).fill({end_time!r});
+                }} else {{
+                    await allInputs.nth(targetEndIdx).fill('');
+                }}
+            }} else {{
+                {start_fill_code}
+                {end_fill_code}
+            }}
 
             // ---------------------------------------------------------
             // CHARGE TYPE (REACT-SELECT COMPATIBLE)
@@ -589,6 +632,9 @@ def main():
         default_status = "Completed (On Hold)"
         default_charge = "Internal Work"
         ohayou_text = "Eire: Email catchup, internal communication, time recording, work logs"
+        
+        ohayou_start_time = "" 
+        ohayou_end_time = ""
 
         while True:
             ticket, is_ohayou = select_ticket()
@@ -601,10 +647,10 @@ def main():
                 if is_ohayou:
                     worklog_text = ohayou_text
                     status = default_status
-                    start_time = ""
-                    end_time = ""
+                    start_time = ohayou_start_time
+                    end_time = ohayou_end_time
                     charge_type = default_charge
-                    print(f"Using おはよう defaults:\n  - Worklog: {worklog_text}\n  - Status: {status}\n  - Start Time: (Leave unchanged)\n  - End Time: (Leave unchanged)\n  - Charge Type: {charge_type}")
+                    print(f"Using おはよう defaults:\n  - Worklog: {worklog_text}\n  - Status: {status}\n  - Start Time: {start_time if start_time else '(Empty)'}\n  - End Time: {end_time if end_time else '(Empty)'}\n  - Charge Type: {charge_type}")
                 else:
                     worklog_text, status, start_time, end_time, charge_type = get_worklog_details(default_status, default_charge)
                 
