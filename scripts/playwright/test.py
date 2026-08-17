@@ -239,8 +239,19 @@ def scrape_ticket_options():
 
 def run_halo_automation(worklog_text, status, start_time, end_time, charge_type):
     """
-    Run the actual HaloPSA Worklog automation using Playwright code with robust dropdown and submit handling.
+    Run the actual HaloPSA Worklog automation using Playwright code with original start/end time behavior.
     """
+    start_fill_code = (
+        f"await allInputs.nth(timeInputIndexes[0]).fill({start_time!r});"
+        if start_time
+        else "// Start time left unchanged"
+    )
+    end_fill_code = (
+        f"await allInputs.nth(timeInputIndexes[1]).fill({end_time!r});"
+        if end_time
+        else "// End time left unchanged"
+    )
+
     js_code = textwrap.dedent(
         f"""
         async page => {{
@@ -294,23 +305,21 @@ def run_halo_automation(worklog_text, status, start_time, end_time, charge_type)
             }}
 
             // ---------------------------------------------------------
-            // JOB START / END TIMES & SYSTEM CLOCK CHECK
+            // JOB START / END TIMES (ORIGINAL SCRIPT BEHAVIOR)
             // ---------------------------------------------------------
 
-            console.log("Job Start Time input: {start_time if start_time else '(Default / Unchanged)'}");
-            console.log("Job End Time input: {end_time if end_time else '(Default / Unchanged)'}");
+            console.log("Job Start Time input: {start_time if start_time else '(Leave unchanged)'}");
+            console.log("Job End Time input: {end_time if end_time else '(Leave unchanged)'}");
 
             const timeInputIndexes = await page.locator("input").evaluateAll(inputs => {{
                 const result = [];
                 inputs.forEach((input, index) => {{
+                    const value = input.value || "";
                     const type = (input.getAttribute("type") || "text").toLowerCase();
                     const style = window.getComputedStyle(input);
-                    const rect = input.getBoundingClientRect();
-                    if (style.display !== "none" && style.visibility !== "hidden" && rect.width > 0 && (type === "text" || type === "time")) {{
-                        const placeholder = (input.getAttribute("placeholder") || "").toLowerCase();
-                        const ariaLabel = (input.getAttribute("aria-label") || "").toLowerCase();
-                        const className = (input.className || "").toLowerCase();
-                        if (!placeholder.includes("search") && !ariaLabel.includes("search") && !className.includes("select__input")) {{
+                    
+                    if (style.display !== "none" && style.visibility !== "hidden" && (type === "text" || type === "time")) {{
+                        if (value.includes(":") && !value.includes("-") && !value.includes("/")) {{
                             result.push(index);
                         }}
                     }}
@@ -318,7 +327,7 @@ def run_halo_automation(worklog_text, status, start_time, end_time, charge_type)
                 return result;
             }});
 
-            console.log("Qualified input indices found:", timeInputIndexes);
+            console.log("Time input indices found:", timeInputIndexes);
 
             if (timeInputIndexes.length < 2) {{
                 throw new Error(
@@ -327,58 +336,9 @@ def run_halo_automation(worklog_text, status, start_time, end_time, charge_type)
             }}
 
             const allInputs = page.locator("input");
-            const targetStartIdx = timeInputIndexes[timeInputIndexes.length - 2];
-            const targetEndIdx = timeInputIndexes[timeInputIndexes.length - 1];
 
-            console.log("Using input indices for Start/End:", targetStartIdx, targetEndIdx);
-
-            // Check if system clock matches the page's default job start and end times as a check
-            const now = new Date();
-            const currentSystemHours = String(now.getHours()).padStart(2, '0');
-            const currentSystemMinutes = String(now.getMinutes()).padStart(2, '0');
-            const expectedSystemTime = currentSystemHours + ":" + currentSystemMinutes;
-
-            const pageStartTime = await allInputs.nth(targetStartIdx).inputValue();
-            const pageEndTime = await allInputs.nth(targetEndIdx).inputValue();
-
-            console.log("System clock time:", expectedSystemTime);
-            console.log("Page start time field:", pageStartTime);
-            console.log("Page end time field:", pageEndTime);
-
-            const startMinutesDiff = pageStartTime ? Math.abs(parseInt(pageStartTime.split(':')[0]) * 60 + parseInt(pageStartTime.split(':')[1]) - (now.getHours() * 60 + now.getMinutes())) : 999;
-            const endMinutesDiff = pageEndTime ? Math.abs(parseInt(pageEndTime.split(':')[0]) * 60 + parseInt(pageEndTime.split(':')[1]) - (now.getHours() * 60 + now.getMinutes())) : 999;
-
-            if (startMinutesDiff > 5 || endMinutesDiff > 5) {{
-                console.log("System clock does not match page job start/end times. Fields not found / mismatch. Refreshing page...");
-                await page.reload();
-                throw new Error("PAGE_REFRESH_REQUIRED");
-            }}
-
-            // Replace values if specified, or fill them
-            const userStartTime = {start_time!r};
-            const userEndTime = {end_time!r};
-
-            if (userStartTime) {{
-                console.log("Filling Start Time with:", userStartTime);
-                await allInputs.nth(targetStartIdx).fill(userStartTime);
-            }} else {{
-                console.log("Keeping default/current Start Time on page.");
-            }}
-
-            if (userEndTime) {{
-                console.log("Filling End Time with:", userEndTime);
-                await allInputs.nth(targetEndIdx).fill(userEndTime);
-            }} else {{
-                console.log("Keeping default/current End Time on page.");
-            }}
-
-            // Ensure any accidentally opened calendar overlays are closed
-            await page.keyboard.press("Escape");
-            await page.waitForTimeout(500);
-            await page.evaluate(() => {{
-                document.body.click();
-            }});
-            await page.waitForTimeout(500);
+            {start_fill_code}
+            {end_fill_code}
 
             // ---------------------------------------------------------
             // CHARGE TYPE (REACT-SELECT COMPATIBLE)
@@ -482,22 +442,10 @@ def run_halo_automation(worklog_text, status, start_time, end_time, charge_type)
 
         print("\nRunning Halo automation...")
 
-        try:
-            run_cli(
-                "run-code",
-                f"--filename={temp_path}",
-            )
-        except RuntimeError as e:
-            if "PAGE_REFRESH_REQUIRED" in str(e):
-                print("\nDetected mismatched time inputs or missing fields. Refreshing page and retrying automation...")
-                goto_ticket(ticket_global_ref)
-                time.sleep(2)
-                run_cli(
-                    "run-code",
-                    f"--filename={temp_path}",
-                )
-            else:
-                raise
+        run_cli(
+            "run-code",
+            f"--filename={temp_path}",
+        )
 
     finally:
         if temp_path and os.path.exists(temp_path):
@@ -554,11 +502,8 @@ def get_worklog_details(default_status, default_charge):
             status = status_input
             break
 
-    start_input = input("Start time [Leave empty to keep system clock default]: ").strip()
-    start_time = start_input if start_input else ""
-
-    end_input = input("End time [Leave empty to keep system clock default]: ").strip()
-    end_time = end_input if end_input else ""
+    start_time = input("Start time [Leave unchanged, e.g. 09:00]: ").strip()
+    end_time = input("End time [Leave unchanged, e.g. 10:00]: ").strip()
 
     # Charge type selection with '?' option menu
     charge_options = [
@@ -664,12 +609,7 @@ def select_ticket():
     return ticket, is_ohayou
 
 
-# Global reference for page retries
-ticket_global_ref = None
-
-
 def main():
-    global ticket_global_ref
     print()
     print("HaloPSA Worklog Automation")
     print("==========================")
@@ -680,16 +620,13 @@ def main():
         default_status = "Completed (On Hold)"
         default_charge = "Internal Work"
         ohayou_text = "Eire: Email catchup, internal communication, time recording, work logs"
-        
         ohayou_start_time = "" 
         ohayou_end_time = ""
 
         while True:
             ticket, is_ohayou = select_ticket()
-            ticket_global_ref = ticket
             goto_ticket(ticket)
 
-            # Main worklog entry loop (supports multiple notes on the same ticket)
             while True:
                 print(f"\n--- Worklog Entry for Ticket {ticket} ---")
                 
@@ -699,21 +636,16 @@ def main():
                     start_time = ohayou_start_time
                     end_time = ohayou_end_time
                     charge_type = default_charge
-                    print(f"Using おはよう defaults:\n  - Worklog: {worklog_text}\n  - Status: {status}\n  - Start Time: (System Default)\n  - End Time: (System Default)\n  - Charge Type: {charge_type}")
+                    print(f"Using おはよう defaults:\n  - Worklog: {worklog_text}\n  - Status: {status}\n  - Start Time: (Leave Unchanged)\n  - End Time: (Leave Unchanged)\n  - Charge Type: {charge_type}")
                 else:
                     worklog_text, status, start_time, end_time, charge_type = get_worklog_details(default_status, default_charge)
                 
                 run_halo_automation(worklog_text, status, start_time, end_time, charge_type)
                 
-                # Ask if user wants to add another note for this ticket
                 add_more = input("\nDo you want to create another worklog entry for this ticket? (y/N): ").strip().lower()
                 if add_more == 'y':
-                    # Refresh page before creating additional worklog entries on the same ticket
                     print("\nRefreshing ticket page before adding another worklog entry...")
                     goto_ticket(ticket)
-                    
-                    # If it was おはよう (option 3), change is_ohayou to False for subsequent notes
-                    # so it prompts the user normally for details instead of infinitely looping the same おはよう note.
                     is_ohayou = False
                     continue
                 else:
@@ -721,7 +653,6 @@ def main():
 
             take_snapshot()
 
-            # Post-completion navigation prompt
             print("\n--------------------------------")
             post_choice = input("[1] Go back to Assigned Tickets view\n[2] Exit\nSelect option [1/2] [2]: ").strip()
             
