@@ -239,15 +239,15 @@ def scrape_ticket_options():
 
 def run_halo_automation(worklog_text, status, start_time, end_time, charge_type):
     """
-    Run the actual HaloPSA Worklog automation using Playwright code with original start/end time behavior.
+    Run the actual HaloPSA Worklog automation using Playwright code with snapshot-based time input targeting.
     """
     start_fill_code = (
-        f"await allInputs.nth(timeInputIndexes[0]).fill({start_time!r});"
+        f"await startTimeInput.fill({start_time!r});"
         if start_time
         else "// Start time left unchanged"
     )
     end_fill_code = (
-        f"await allInputs.nth(timeInputIndexes[1]).fill({end_time!r});"
+        f"await endTimeInput.fill({end_time!r});"
         if end_time
         else "// End time left unchanged"
     )
@@ -305,37 +305,14 @@ def run_halo_automation(worklog_text, status, start_time, end_time, charge_type)
             }}
 
             // ---------------------------------------------------------
-            // JOB START / END TIMES (ORIGINAL SCRIPT BEHAVIOR)
+            // JOB START / END TIMES (SNAPSHOT STRUCTURE BASED)
             // ---------------------------------------------------------
 
             console.log("Job Start Time input: {start_time if start_time else '(Leave unchanged)'}");
             console.log("Job End Time input: {end_time if end_time else '(Leave unchanged)'}");
 
-            const timeInputIndexes = await page.locator("input").evaluateAll(inputs => {{
-                const result = [];
-                inputs.forEach((input, index) => {{
-                    const value = input.value || "";
-                    const type = (input.getAttribute("type") || "text").toLowerCase();
-                    const style = window.getComputedStyle(input);
-                    
-                    if (style.display !== "none" && style.visibility !== "hidden" && (type === "text" || type === "time")) {{
-                        if (value.includes(":") && !value.includes("-") && !value.includes("/")) {{
-                            result.push(index);
-                        }}
-                    }}
-                }});
-                return result;
-            }});
-
-            console.log("Time input indices found:", timeInputIndexes);
-
-            if (timeInputIndexes.length < 2) {{
-                throw new Error(
-                    "Could not find the two Halo Worklog time inputs. Found " + timeInputIndexes.length
-                );
-            }}
-
-            const allInputs = page.locator("input");
+            const startTimeInput = page.locator('text=Job Start').locator('xpath=..').locator('input[type="text"], input:not([type])').last();
+            const endTimeInput = page.locator('text=Job End').locator('xpath=..').locator('input[type="text"], input:not([type])').last();
 
             {start_fill_code}
             {end_fill_code}
