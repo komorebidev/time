@@ -1,7 +1,6 @@
 import os
 import sys
 import atexit
-import json
 import platform
 import re
 import shutil
@@ -143,112 +142,98 @@ def goto_ticket(ticket):
     time.sleep(1)
 
 
+def parse_snapshot_tickets(snapshot_output):
+    """
+    Parses the playwright-cli snapshot text output into structured ticket dictionaries
+    based on the exact DOM line structure.
+    """
+    tickets = []
+    lines = snapshot_output.splitlines()
+    
+    current_block = []
+    in_ticket_block = False
+
+    for line in lines:
+        if '"Bulk select"' in line or '[cursor=pointer]' in line:
+            if current_block:
+                parsed = _parse_single_block(current_block)
+                if parsed:
+                    tickets.append(parsed)
+            current_block = [line]
+            in_ticket_block = True
+        elif in_ticket_block:
+            current_block.append(line)
+
+    if current_block:
+        parsed = _parse_single_block(current_block)
+        if parsed:
+            tickets.append(parsed)
+
+    return tickets
+
+
+def _parse_single_block(block_lines):
+    ticket_id = None
+    company = None
+    status = None
+    ticket_name = None
+    date_str = None
+    ticket_type = None
+    total_hours = None
+
+    clean_lines = []
+    for line in block_lines:
+        match_quote = re.search(r'"([^"]+)"', line)
+        match_text = re.search(r'text:\s*(.*)', line)
+        
+        if match_quote:
+            clean_lines.append(match_quote.group(1))
+        elif match_text:
+            clean_lines.append(match_text.group(1).strip())
+        else:
+            parts = line.split(':', 1)
+            if len(parts) > 1 and '"' not in parts[1]:
+                val = parts[1].strip()
+                if val and not val.startswith('['):
+                    clean_lines.append(val)
+
+    for i, l in enumerate(clean_lines):
+        if re.match(r'^00\d{5}$', l):
+            ticket_id = l
+        elif '/' in l and 'EIRE' in l:
+            company = l
+        elif l in ["Completed (On Hold)", "In Progress", "On Hold", "New", "Closed"]:
+            status = l
+        elif re.match(r'^\d{1,2}/\d{1,2}/\d{4}\s+\d{2}:\d{2}$', l):
+            date_str = l
+            if i > 0:
+                ticket_name = clean_lines[i - 1]
+        elif l in ["Service Request", "Incident", "Project Support", "Problem", "Change Request"]:
+            ticket_type = l
+        elif re.match(r'^\d+:\d{2}$', l):
+            total_hours = l
+
+    if ticket_id:
+        return {
+            "id": ticket_id,
+            "title": ticket_name or f"Ticket {ticket_id}",
+            "company": company,
+            "status": status,
+            "date": date_str,
+            "type": ticket_type,
+            "hours": total_hours
+        }
+    
+    return None
+
+
 def scrape_ticket_options():
     """
-    Intelligently parse ticket IDs, titles, dates, and types from the 
-    playwright-cli snapshot output using strict positional and ticket-type rules.
+    Take a snapshot and parse text lines using robust block pattern matching.
     """
-    print("\nTaking snapshot to extract tickets and metadata...")
+    print("\nTaking snapshot to parse tickets...")
     output = run_cli("snapshot", check=True)
-    
-    tickets = []
-    seen_ids = set()
-    lines = output.splitlines()
-    
-    def process_block(ticket_id, block_lines):
-        if not ticket_id or ticket_id in seen_ids:
-            return
-        seen_ids.add(ticket_id)
-        
-        title = f"Ticket {ticket_id}"
-        date_str = ""
-        ticket_type = ""
-        
-        # First pass: Determine ticket type and date string
-        for line in block_lines:
-            if re.search(r'\d{1,2}/\d{1,2}/\d{4}\s+\d{2}:\d{2}', line):
-                date_match = re.search(r'([\d/]+\s+[\d:]+)', line)
-                if date_match:
-                    date_str = date_match.group(1)
-            if any(t in line for t in ["Service Request", "Incident", "Project Support"]):
-                for t in ["Service Request", "Incident", "Project Support"]:
-                    if t in line:
-                        ticket_type = t
-                        break
-
-        # Collect and clean meaningful text lines in exact order of appearance
-        ordered_candidates = []
-        for line in block_lines:
-            # Skip duration lines, dates, types, and UI metadata
-            if re.search(r'^\s*-\s*(?:generic|text):\s*\d+:\d+\s*$', line):
-                continue
-            if re.search(r'\d{1,2}/\d{1,2}/\d{4}\s+\d{2}:\d{2}', line):
-                continue
-            if any(t in line for t in ["Service Request", "Incident", "Project Support"]):
-                continue
-
-            clean_line = re.sub(r'\[ref=e\d+\]', '', line)
-            clean_line = re.sub(r'^\s*-\s*(?:generic|text)?\s*(?:"[^"]*")?\s*:\s*', '', clean_line)
-            clean_line = re.sub(r'^\s*-\s*(?:generic|text)\b', '', clean_line)
-            clean_line = clean_line.strip('" :')
-            
-            if not clean_line or len(clean_line) < 2:
-                continue
-                
-            lower_line = clean_line.lower()
-            if re.match(r'^00\d{5}$', clean_line):
-                continue
-            if re.match(r'^\d+:\d+$', clean_line):
-                continue
-            if any(kw in lower_line for kw in ['cursor=pointer', 'checkbox', 'bulk select', 'available', 'on hold', 'completed', 'low', 'medium', 'high']):
-                continue
-            if len(clean_line) <= 3 and clean_line.isupper():
-                continue
-
-            ordered_candidates.append(clean_line)
-
-        # Positional / Type-aware resolution based on snapshot layout structure
-        if ticket_type == "Project Support":
-            path_candidates = [c for c in ordered_candidates if '/' in c]
-            if path_candidates:
-                title = path_candidates[0]
-            elif ordered_candidates:
-                title = ordered_candidates[-1]
-        else:
-            non_path_candidates = [c for c in ordered_candidates if '/' not in c]
-            if non_path_candidates:
-                title = non_path_candidates[-1]
-            elif ordered_candidates:
-                title = ordered_candidates[-1]
-
-        tickets.append({
-            "id": ticket_id,
-            "title": title,
-            "date": date_str,
-            "type": ticket_type
-        })
-
-    active_id = None
-    block_buffer = []
-    
-    for line in lines:
-        id_match = re.search(r'"(00\d{5})"', line)
-        if id_match:
-            if active_id:
-                process_block(active_id, block_buffer)
-            active_id = id_match.group(1)
-            block_buffer = []
-        elif active_id:
-            block_buffer.append(line)
-            if "cursor=pointer" in line and len(block_buffer) > 4:
-                process_block(active_id, block_buffer)
-                active_id = None
-                block_buffer = []
-                
-    if active_id:
-        process_block(active_id, block_buffer)
-        
-    return tickets
+    return parse_snapshot_tickets(output)
 
 
 def run_halo_automation(worklog_text, status, start_time, end_time, charge_type):
@@ -311,10 +296,15 @@ def run_halo_automation(worklog_text, status, start_time, end_time, charge_type)
             await statusCombobox.click();
             await page.waitForTimeout(800);
 
-            await page.getByText(
-                {status!r},
-                {{ exact: true }}
-            ).click();
+            try {{
+                await page.getByText({status!r}, {{ exact: true }}).click();
+            }} catch (e) {{
+                await page.evaluate((targetText) => {{
+                    const items = Array.from(document.querySelectorAll('.dropdown-item, [role=\\'option\\'], li, div'));
+                    const match = items.find(el => el.textContent.trim() === targetText);
+                    if (match) match.click();
+                }}, {status!r});
+            }}
 
             // ---------------------------------------------------------
             // JOB START / END TIMES
@@ -368,10 +358,15 @@ def run_halo_automation(worklog_text, status, start_time, end_time, charge_type)
             await chargeTypeCombobox.click();
             await page.waitForTimeout(800);
 
-            await page.getByText(
-                {charge_type!r},
-                {{ exact: true }}
-            ).click();
+            try {{
+                await page.getByText({charge_type!r}, {{ exact: true }}).click();
+            }} catch (e) {{
+                await page.evaluate((targetText) => {{
+                    const items = Array.from(document.querySelectorAll('.dropdown-item, [role=\\'option\\'], li, div, span'));
+                    const match = items.find(el => el.textContent.trim() === targetText);
+                    if (match) match.click();
+                }}, {charge_type!r});
+            }}
 
             // ---------------------------------------------------------
             // FINAL CHECK
@@ -464,7 +459,7 @@ def main():
                 else:
                     ticket = sel
             else:
-                print("No tickets could be automatically scraped from this snapshot.")
+                print("No tickets could be automatically parsed from this snapshot.")
 
         while not ticket or not ticket.isdigit():
             ticket = input("\nEnter Ticket Number: ").strip()
