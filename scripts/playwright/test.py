@@ -254,7 +254,6 @@ def run_halo_automation(worklog_text, status, start_time, end_time, charge_type)
     js_code = textwrap.dedent(
         f"""
         async page => {{
-
             console.log("Opening Worklog...");
 
             await page.getByRole("button", {{
@@ -278,9 +277,7 @@ def run_halo_automation(worklog_text, status, start_time, end_time, charge_type)
                 timeout: 10000
             }});
 
-            await editor.fill(
-                {worklog_text!r}
-            );
+            await editor.fill({worklog_text!r});
 
             // ---------------------------------------------------------
             // STATUS
@@ -300,7 +297,7 @@ def run_halo_automation(worklog_text, status, start_time, end_time, charge_type)
                 await page.getByText({status!r}, {{ exact: true }}).click();
             }} catch (e) {{
                 await page.evaluate((targetText) => {{
-                    const items = Array.from(document.querySelectorAll('.dropdown-item, [role=\\'option\\'], li, div, .Select__option'));
+                    const items = Array.from(document.querySelectorAll('.dropdown-item, [role="option"], li, div, .Select__option'));
                     const match = items.find(el => el.textContent.trim() === targetText);
                     if (match) match.click();
                 }}, {status!r});
@@ -369,14 +366,14 @@ def run_halo_automation(worklog_text, status, start_time, end_time, charge_type)
                             'div',
                             'span'
                         ];
-                        for (const sel of selectors) {
+                        for (const sel of selectors) {{
                             const items = Array.from(document.querySelectorAll(sel));
                             const match = items.find(el => el.offsetParent !== null && el.textContent.trim() === targetText);
-                            if (match) {
+                            if (match) {{
                                 match.click();
                                 return true;
-                            }
-                        }
+                            }}
+                        }}
                         return false;
                     }}, {charge_type!r});
 
@@ -384,8 +381,8 @@ def run_halo_automation(worklog_text, status, start_time, end_time, charge_type)
                         chargeSelected = true;
                         break;
                     }}
-                } catch (err) {{
-                    console.log(`Attempt ${attempt} failed, retrying...`);
+                }} catch (err) {{
+                    console.log("Attempt " + attempt + " failed, retrying...");
                 }}
                 await page.waitForTimeout(1000);
             }}
@@ -409,24 +406,21 @@ def run_halo_automation(worklog_text, status, start_time, end_time, charge_type)
             console.log("Worklog fields populated. Saving...");
 
             await page.evaluate(() => {{
-                // Close any lingering dropdown menus or blur active elements
                 document.body.click();
                 
-                // Find the Save submit input/button
                 const saveBtn = Array.from(document.querySelectorAll('input[type="submit"], button')).find(
                     el => el.value === "Save" || el.textContent.trim() === "Save"
                 );
-                if (saveBtn) {
+                if (saveBtn) {{
                     saveBtn.click();
-                } else {
+                }} else {{
                     throw new Error("Save button not found in DOM.");
-                }
+                }}
             }});
 
             await page.waitForTimeout(2000);
 
             console.log("Worklog saved.");
-
         }}
         """
     )
