@@ -537,6 +537,47 @@ def get_worklog_details(default_status, default_charge):
     return worklog_text, status, start_time, end_time, charge_type
 
 
+def select_ticket():
+    """
+    Handles ticket selection via manual input or scraping the assigned tickets page.
+    """
+    choice = input(
+        "\n[1] Enter Ticket ID manually\n"
+        "[2] Scrape Ticket IDs & metadata from current snapshot view\n"
+        "[3] おはよう (Quick Entry)\n"
+        "Select option [1/2/3]: "
+    ).strip()
+
+    ticket = ""
+    is_ohayou = (choice == "3")
+
+    if choice in ("2", "3"):
+        tickets = scrape_ticket_options()
+        if tickets:
+            print(f"\nFound {len(tickets)} tickets on the current page:")
+            for idx, t in enumerate(tickets, 1):
+                date_info = f" [{t['date']}]" if t['date'] else ""
+                type_info = f" ({t['type']})" if t['type'] else ""
+                print(f"  [{idx}] {t['id']}{date_info}{type_info} - {t['title']}")
+            
+            sel = input("\nEnter selection number or type a Ticket ID directly: ").strip()
+            if sel.isdigit() and 1 <= int(sel) <= len(tickets):
+                ticket = tickets[int(sel) - 1]["id"]
+                print(f"Selected Ticket ID: {ticket}")
+            else:
+                ticket = sel
+        else:
+            print("No tickets could be automatically parsed from this snapshot.")
+
+    while not ticket or not ticket.isdigit():
+        ticket = input("\nEnter Ticket Number: ").strip()
+        if not ticket or not ticket.isdigit():
+            print("Please enter a valid numeric ticket number.")
+            ticket = ""
+
+    return ticket, is_ohayou
+
+
 def main():
     print()
     print("HaloPSA Worklog Automation")
@@ -545,64 +586,48 @@ def main():
     try:
         attach()
 
-        ticket = ""
-        choice = input(
-            "\n[1] Enter Ticket ID manually\n"
-            "[2] Scrape Ticket IDs & metadata from current snapshot view\n"
-            "Select option [1/2]: "
-        ).strip()
-
-        if choice == "2":
-            tickets = scrape_ticket_options()
-            if tickets:
-                print(f"\nFound {len(tickets)} tickets on the current page:")
-                for idx, t in enumerate(tickets, 1):
-                    date_info = f" [{t['date']}]" if t['date'] else ""
-                    type_info = f" ({t['type']})" if t['type'] else ""
-                    print(f"  [{idx}] {t['id']}{date_info}{type_info} - {t['title']}")
-                
-                sel = input("\nEnter selection number or type a Ticket ID directly: ").strip()
-                if sel.isdigit() and 1 <= int(sel) <= len(tickets):
-                    ticket = tickets[int(sel) - 1]["id"]
-                    print(f"Selected Ticket ID: {ticket}")
-                else:
-                    ticket = sel
-            else:
-                print("No tickets could be automatically parsed from this snapshot.")
-
-        while not ticket or not ticket.isdigit():
-            ticket = input("\nEnter Ticket Number: ").strip()
-            if not ticket or not ticket.isdigit():
-                print("Please enter a valid numeric ticket number.")
-                ticket = ""
-
-        goto_ticket(ticket)
-
         default_status = "Completed (On Hold)"
         default_charge = "Internal Work"
+        ohayou_text = "Eire: Email catchup, internal communication, time recording, work logs"
 
-        # Main worklog entry loop (supports multiple notes on the same ticket)
         while True:
-            print(f"\n--- Worklog Entry for Ticket {ticket} ---")
-            worklog_text, status, start_time, end_time, charge_type = get_worklog_details(default_status, default_charge)
+            ticket, is_ohayou = select_ticket()
+            goto_ticket(ticket)
+
+            # Main worklog entry loop (supports multiple notes on the same ticket)
+            while True:
+                print(f"\n--- Worklog Entry for Ticket {ticket} ---")
+                
+                if is_ohayou:
+                    worklog_text = ohayou_text
+                    status = default_status
+                    start_time = ""
+                    end_time = ""
+                    charge_type = default_charge
+                    print(f"Using おはよう defaults:\n  - Worklog: {worklog_text}\n  - Status: {status}\n  - Start Time: (Leave unchanged)\n  - End Time: (Leave unchanged)\n  - Charge Type: {charge_type}")
+                else:
+                    worklog_text, status, start_time, end_time, charge_type = get_worklog_details(default_status, default_charge)
+                
+                run_halo_automation(worklog_text, status, start_time, end_time, charge_type)
+                
+                # Ask if user wants to add another note for this ticket
+                add_more = input("\nDo you want to create another worklog entry for this ticket? (y/N): ").strip().lower()
+                if add_more != 'y':
+                    break
+
+            take_snapshot()
+
+            # Post-completion navigation prompt
+            print("\n--------------------------------")
+            post_choice = input("[1] Go back to Assigned Tickets view\n[2] Exit\nSelect option [1/2] [2]: ").strip()
             
-            run_halo_automation(worklog_text, status, start_time, end_time, charge_type)
-            
-            # Ask if user wants to add another note for this ticket
-            add_more = input("\nDo you want to create another worklog entry for this ticket? (y/N): ").strip().lower()
-            if add_more != 'y':
+            if post_choice == "1":
+                print("\nReturning to Assigned Tickets view...")
+                run_cli("goto", ASSIGNED_TICKETS_URL)
+                time.sleep(2)
+                continue
+            else:
                 break
-
-        take_snapshot()
-
-        # Post-completion navigation prompt
-        print("\n--------------------------------")
-        post_choice = input("[1] Go back to Assigned Tickets view\n[2] Exit\nSelect option [1/2] [2]: ").strip()
-        
-        if post_choice == "1":
-            print("\nReturning to Assigned Tickets view...")
-            run_cli("goto", ASSIGNED_TICKETS_URL)
-            time.sleep(1)
 
         print()
         print("================================")
