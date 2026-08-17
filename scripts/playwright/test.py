@@ -462,6 +462,81 @@ def take_snapshot():
     run_cli("snapshot")
 
 
+def get_worklog_details(default_status, default_charge):
+    """
+    Prompt user for worklog details (text, status, times, charge type).
+    """
+    worklog_text = ""
+    while not worklog_text:
+        worklog_text = input("Worklog text (Required): ").strip()
+        if not worklog_text:
+            print("Worklog text cannot be empty.")
+
+    # Status selection with '?' option menu
+    status_options = [
+        "In Progress",
+        "Completed (On Hold)",
+        "On Hold"
+    ]
+    status = default_status
+
+    while True:
+        status_input = input(f"Status [? for options] [{default_status}]: ").strip()
+        if status_input == "?":
+            print("\nAvailable Statuses:")
+            print("-" * 25)
+            for idx, opt in enumerate(status_options, 1):
+                print(f"  [{idx}] {opt}")
+            print("-" * 25)
+            sel = input("Select option number: ").strip()
+            if sel.isdigit() and 1 <= int(sel) <= len(status_options):
+                status = status_options[int(sel) - 1]
+                break
+            else:
+                print("Invalid selection. Try again or enter custom text.")
+        elif not status_input:
+            status = default_status
+            break
+        else:
+            status = status_input
+            break
+
+    start_time = input("Start time [Leave unchanged, e.g. 09:00]: ").strip()
+    end_time = input("End time [Leave unchanged, e.g. 10:00]: ").strip()
+
+    # Charge type selection with '?' option menu
+    charge_options = [
+        "Project Work- Managed Services",
+        "Research (work-specific)",
+        "Professional Development",
+        "Internal Work"
+    ]
+    charge_type = default_charge
+
+    while True:
+        charge_input = input(f"Charge type [? for options] [{default_charge}]: ").strip()
+        if charge_input == "?":
+            print("\nAvailable Charge Types:")
+            print("-" * 35)
+            for idx, opt in enumerate(charge_options, 1):
+                print(f"  [{idx}] {opt}")
+            print("-" * 35)
+            sel = input("Select option number: ").strip()
+            if sel.isdigit() and 1 <= int(sel) <= len(charge_options):
+                charge_type = charge_options[int(sel) - 1]
+                break
+            else:
+                print("Invalid selection. Try again or enter custom text.")
+        elif not charge_input:
+            charge_type = default_charge
+            break
+        else:
+            charge_type = charge_input
+            break
+
+    return worklog_text, status, start_time, end_time, charge_type
+
+
 def main():
     print()
     print("HaloPSA Worklog Automation")
@@ -501,79 +576,33 @@ def main():
                 print("Please enter a valid numeric ticket number.")
                 ticket = ""
 
-        worklog_text = ""
-        while not worklog_text:
-            worklog_text = input("Worklog text (Required): ").strip()
-            if not worklog_text:
-                print("Worklog text cannot be empty.")
-
-        # Status selection with '?' option menu
-        status_options = [
-            "In Progress",
-            "Completed (On Hold)",
-            "On Hold"
-        ]
-        default_status = "Completed (On Hold)"
-        status = default_status
-
-        while True:
-            status_input = input(f"Status [? for options] [{default_status}]: ").strip()
-            if status_input == "?":
-                print("\nAvailable Statuses:")
-                print("-" * 25)
-                for idx, opt in enumerate(status_options, 1):
-                    print(f"  [{idx}] {opt}")
-                print("-" * 25)
-                sel = input("Select option number: ").strip()
-                if sel.isdigit() and 1 <= int(sel) <= len(status_options):
-                    status = status_options[int(sel) - 1]
-                    break
-                else:
-                    print("Invalid selection. Try again or enter custom text.")
-            elif not status_input:
-                status = default_status
-                break
-            else:
-                status = status_input
-                break
-
-        start_time = input("Start time [Leave unchanged, e.g. 09:00]: ").strip()
-        end_time = input("End time [Leave unchanged, e.g. 10:00]: ").strip()
-
-        # Charge type selection with '?' option menu
-        charge_options = [
-            "Project Work- Managed Services",
-            "Research (work-specific)",
-            "Professional Development",
-            "Internal Work"
-        ]
-        default_charge = "Internal Work"
-        charge_type = default_charge
-
-        while True:
-            charge_input = input(f"Charge type [? for options] [{default_charge}]: ").strip()
-            if charge_input == "?":
-                print("\nAvailable Charge Types:")
-                print("-" * 35)
-                for idx, opt in enumerate(charge_options, 1):
-                    print(f"  [{idx}] {opt}")
-                print("-" * 35)
-                sel = input("Select option number: ").strip()
-                if sel.isdigit() and 1 <= int(sel) <= len(charge_options):
-                    charge_type = charge_options[int(sel) - 1]
-                    break
-                else:
-                    print("Invalid selection. Try again or enter custom text.")
-            elif not charge_input:
-                charge_type = default_charge
-                break
-            else:
-                charge_type = charge_input
-                break
-
         goto_ticket(ticket)
-        run_halo_automation(worklog_text, status, start_time, end_time, charge_type)
+
+        default_status = "Completed (On Hold)"
+        default_charge = "Internal Work"
+
+        # Main worklog entry loop (supports multiple notes on the same ticket)
+        while True:
+            print(f"\n--- Worklog Entry for Ticket {ticket} ---")
+            worklog_text, status, start_time, end_time, charge_type = get_worklog_details(default_status, default_charge)
+            
+            run_halo_automation(worklog_text, status, start_time, end_time, charge_type)
+            
+            # Ask if user wants to add another note for this ticket
+            add_more = input("\nDo you want to create another worklog entry for this ticket? (y/N): ").strip().lower()
+            if add_more != 'y':
+                break
+
         take_snapshot()
+
+        # Post-completion navigation prompt
+        print("\n--------------------------------")
+        post_choice = input("[1] Go back to Assigned Tickets view\n[2] Exit\nSelect option [1/2] [2]: ").strip()
+        
+        if post_choice == "1":
+            print("\nReturning to Assigned Tickets view...")
+            run_cli("goto", ASSIGNED_TICKETS_URL)
+            time.sleep(1)
 
         print()
         print("================================")
