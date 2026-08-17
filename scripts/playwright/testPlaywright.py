@@ -129,7 +129,7 @@ def attach():
 
     print("\nOpening Assigned Tickets view...")
     run_cli("goto", ASSIGNED_TICKETS_URL, check=True)
-    time.sleep(1.5)
+    time.sleep(2)
 
 
 def goto_ticket(ticket):
@@ -200,7 +200,10 @@ def scrape_ticket_options():
                 continue
             if re.match(r'^\d+:\d+$', clean_line):
                 continue
-            if any(kw in lower_line for kw in ['cursor=pointer', 'checkbox', 'bulk select', 'available', 'on hold', 'completed', 'low', 'medium', 'high']):
+            if any(kw in lower_line for kw in [
+                'cursor=pointer', 'checkbox', 'bulk select', 'available', 
+                'on hold', 'completed', 'low', 'medium', 'high', 'engineers tky'
+            ]):
                 continue
             if len(clean_line) <= 3 and clean_line.isupper():
                 continue
