@@ -1,5 +1,4 @@
-await (
-async page => {
+(async (page) => {
     const inputsInfo = await page.evaluate(() => {
         const allInputs = Array.from(document.querySelectorAll('input, select, textarea'));
         return allInputs.map((el, index) => {
@@ -25,5 +24,4 @@ async page => {
             console.log(`[Index ${i.index}] Tag: ${i.tag} | ID: ${i.id} | Name: ${i.name} | Placeholder: ${i.placeholder} | Text: ${i.containerText.substring(0, 100)}`);
         }
     });
-}
-)(page);
+})(page);
