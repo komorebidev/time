@@ -241,17 +241,6 @@ def run_halo_automation(worklog_text, status, start_time, end_time, charge_type)
     """
     Run the actual HaloPSA Worklog automation using Playwright code with robust dropdown and submit handling.
     """
-    start_fill_code = (
-        f"await allInputs.nth(targetStartIdx).fill({start_time!r});"
-        if start_time
-        else "/* keeping default/empty start time */"
-    )
-    end_fill_code = (
-        f"await allInputs.nth(targetEndIdx).fill({end_time!r});"
-        if end_time
-        else "/* keeping default/empty end time */"
-    )
-
     js_code = textwrap.dedent(
         f"""
         async page => {{
@@ -343,7 +332,7 @@ def run_halo_automation(worklog_text, status, start_time, end_time, charge_type)
 
             console.log("Using input indices for Start/End:", targetStartIdx, targetEndIdx);
 
-            // Check if system clock matches the page's default job start and end times
+            // Check if system clock matches the page's default job start and end times as a check
             const now = new Date();
             const currentSystemHours = String(now.getHours()).padStart(2, '0');
             const currentSystemMinutes = String(now.getMinutes()).padStart(2, '0');
@@ -360,13 +349,28 @@ def run_halo_automation(worklog_text, status, start_time, end_time, charge_type)
             const endMinutesDiff = pageEndTime ? Math.abs(parseInt(pageEndTime.split(':')[0]) * 60 + parseInt(pageEndTime.split(':')[1]) - (now.getHours() * 60 + now.getMinutes())) : 999;
 
             if (startMinutesDiff > 5 || endMinutesDiff > 5) {{
-                console.log("System clock does not match page job start/end times. Refreshing page...");
+                console.log("System clock does not match page job start/end times. Fields not found / mismatch. Refreshing page...");
                 await page.reload();
                 throw new Error("PAGE_REFRESH_REQUIRED");
             }}
 
-            {start_fill_code}
-            {end_fill_code}
+            // Replace values if specified, or fill them
+            const userStartTime = {start_time!r};
+            const userEndTime = {end_time!r};
+
+            if (userStartTime) {{
+                console.log("Filling Start Time with:", userStartTime);
+                await allInputs.nth(targetStartIdx).fill(userStartTime);
+            }} else {{
+                console.log("Keeping default/current Start Time on page.");
+            }}
+
+            if (userEndTime) {{
+                console.log("Filling End Time with:", userEndTime);
+                await allInputs.nth(targetEndIdx).fill(userEndTime);
+            }} else {{
+                console.log("Keeping default/current End Time on page.");
+            }}
 
             // Ensure any accidentally opened calendar overlays are closed
             await page.keyboard.press("Escape");
@@ -485,7 +489,7 @@ def run_halo_automation(worklog_text, status, start_time, end_time, charge_type)
             )
         except RuntimeError as e:
             if "PAGE_REFRESH_REQUIRED" in str(e):
-                print("\nDetected mismatched time inputs. Refreshing page and retrying automation...")
+                print("\nDetected mismatched time inputs or missing fields. Refreshing page and retrying automation...")
                 goto_ticket(ticket_global_ref)
                 time.sleep(2)
                 run_cli(
