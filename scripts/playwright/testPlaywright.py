@@ -647,5 +647,7 @@ def run_halo_automation(
             // FINAL CHECK
             // ---------------------------------------------------------
 
-            console.log(
-                "Worklog
+            console.log("Worklog automation script ready.");
+        }}
+        """
+    )
