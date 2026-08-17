@@ -46,7 +46,7 @@ brew install python node
 
 echo
 echo "Installing Python Playwright..."
-python3 -m pip install playwright
+python3 -m pip install playwright --break-system-packages
 
 echo
 echo "Installing official Playwright CLI..."
