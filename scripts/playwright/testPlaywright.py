@@ -200,10 +200,7 @@ def scrape_ticket_options():
                 continue
             if re.match(r'^\d+:\d+$', clean_line):
                 continue
-            if any(kw in lower_line for kw in [
-                'cursor=pointer', 'checkbox', 'bulk select', 'available', 
-                'on hold', 'completed', 'low', 'medium', 'high', 'engineers tky'
-            ]):
+            if any(kw in lower_line for kw in ['cursor=pointer', 'checkbox', 'bulk select', 'available', 'on hold', 'completed', 'low', 'medium', 'high']):
                 continue
             if len(clean_line) <= 3 and clean_line.isupper():
                 continue
@@ -312,14 +309,14 @@ def run_halo_automation(worklog_text, status, start_time, end_time, charge_type)
             );
 
             await statusCombobox.click();
+            await page.waitForTimeout(500);
 
-            await page.getByRole(
-                "option",
-                {{
-                    name: {status!r},
-                    exact: true
-                }}
-            ).click();
+            const statusOption = page.getByRole("option", {{ name: {status!r}, exact: true }});
+            if (await statusOption.count() > 0) {{
+                await statusOption.click();
+            }} else {{
+                await page.locator(".dropdown-item, [role='option'], li").filter({{ hasText: {status!r} }}).first().click();
+            }}
 
             // ---------------------------------------------------------
             // JOB START / END TIMES
@@ -371,14 +368,14 @@ def run_halo_automation(worklog_text, status, start_time, end_time, charge_type)
             );
 
             await chargeTypeCombobox.click();
+            await page.waitForTimeout(500);
 
-            await page.getByRole(
-                "option",
-                {{
-                    name: {charge_type!r},
-                    exact: true
-                }}
-            ).click();
+            const chargeOption = page.getByRole("option", {{ name: {charge_type!r}, exact: true }});
+            if (await chargeOption.count() > 0) {{
+                await chargeOption.click();
+            }} else {{
+                await page.locator(".dropdown-item, [role='option'], li").filter({{ hasText: {charge_type!r} }}).first().click();
+            }}
 
             // ---------------------------------------------------------
             // FINAL CHECK
