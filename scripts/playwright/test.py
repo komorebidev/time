@@ -9,6 +9,7 @@ import subprocess
 import tempfile
 import textwrap
 import time
+import datetime
 
 BASE_URL = "https://support.eiresystems.com/ticket"
 ASSIGNED_TICKETS_URL = "https://support.eiresystems.com/tickets?area=1&mainview=team&viewid=2&selid=75&sellevel=2&selparentid=engineers%20tky"
@@ -506,8 +507,14 @@ def get_worklog_details(default_status, default_charge):
             status = status_input
             break
 
-    start_time = input("Start time [Leave unchanged, e.g. 09:00]: ").strip()
-    end_time = input("End time [Leave unchanged, e.g. 10:00]: ").strip()
+    default_start = "09:00"
+    default_end = "10:00"
+
+    start_input = input(f"Start time [Leave unchanged, e.g. {default_start}] [{default_start}]: ").strip()
+    start_time = default_start if not start_input else start_input
+
+    end_input = input(f"End time [Leave unchanged, e.g. {default_end}] [{default_end}]: ").strip()
+    end_time = default_end if not end_input else end_input
 
     # Charge type selection with '?' option menu
     charge_options = [
@@ -559,18 +566,48 @@ def select_ticket():
     if choice in ("2", "3"):
         tickets = scrape_ticket_options()
         if tickets:
-            print(f"\nFound {len(tickets)} tickets on the current page:")
-            for idx, t in enumerate(tickets, 1):
-                date_info = f" [{t['date']}]" if t['date'] else ""
-                type_info = f" ({t['type']})" if t['type'] else ""
-                print(f"  [{idx}] {t['id']}{date_info}{type_info} - {t['title']}")
-            
-            sel = input("\nEnter selection number or type a Ticket ID directly: ").strip()
-            if sel.isdigit() and 1 <= int(sel) <= len(tickets):
-                ticket = tickets[int(sel) - 1]["id"]
-                print(f"Selected Ticket ID: {ticket}")
+            if is_ohayou:
+                current_month_name = datetime.datetime.now().strftime("%B").lower()
+                current_month_short = datetime.datetime.now().strftime("%b").lower()
+                
+                matched_ticket = None
+                for t in tickets:
+                    title_lower = t['title'].lower()
+                    if current_month_name in title_lower or current_month_short in title_lower:
+                        matched_ticket = t
+                        break
+
+                if matched_ticket:
+                    ticket = matched_ticket["id"]
+                    print(f"\n[おはよう] Automatically detected ticket matching current month ({datetime.datetime.now().strftime('%B')}):")
+                    print(f"  -> [{ticket}] - {matched_ticket['title']}")
+                else:
+                    print(f"\n[おはよう] Could not automatically detect a ticket matching the current month ({datetime.datetime.now().strftime('%B')}). Please manually select from the list below:")
+                    print(f"\nFound {len(tickets)} tickets on the current page:")
+                    for idx, t in enumerate(tickets, 1):
+                        date_info = f" [{t['date']}]" if t['date'] else ""
+                        type_info = f" ({t['type']})" if t['type'] else ""
+                        print(f"  [{idx}] {t['id']}{date_info}{type_info} - {t['title']}")
+                    
+                    sel = input("\nEnter selection number or type a Ticket ID directly: ").strip()
+                    if sel.isdigit() and 1 <= int(sel) <= len(tickets):
+                        ticket = tickets[int(sel) - 1]["id"]
+                        print(f"Selected Ticket ID: {ticket}")
+                    else:
+                        ticket = sel
             else:
-                ticket = sel
+                print(f"\nFound {len(tickets)} tickets on the current page:")
+                for idx, t in enumerate(tickets, 1):
+                    date_info = f" [{t['date']}]" if t['date'] else ""
+                    type_info = f" ({t['type']})" if t['type'] else ""
+                    print(f"  [{idx}] {t['id']}{date_info}{type_info} - {t['title']}")
+                
+                sel = input("\nEnter selection number or type a Ticket ID directly: ").strip()
+                if sel.isdigit() and 1 <= int(sel) <= len(tickets):
+                    ticket = tickets[int(sel) - 1]["id"]
+                    print(f"Selected Ticket ID: {ticket}")
+                else:
+                    ticket = sel
         else:
             print("No tickets could be automatically parsed from this snapshot.")
 
@@ -620,7 +657,12 @@ def main():
                 
                 # Ask if user wants to add another note for this ticket
                 add_more = input("\nDo you want to create another worklog entry for this ticket? (y/N): ").strip().lower()
-                if add_more != 'y':
+                if add_more == 'y':
+                    # If it was おはよう (option 3), change is_ohayou to False for subsequent notes
+                    # so it prompts the user normally for details instead of infinitely looping the same おはよう note.
+                    is_ohayou = False
+                    continue
+                else:
                     break
 
             take_snapshot()
