@@ -1,60 +1,29 @@
-import subprocess
-import tempfile
-import os
-
-SESSION = "halo"
-CLI = "playwright-cli"
-
-# This snippet runs inside the browser via page.evaluate()
-js_code = """
+await (
 async page => {
-    // Inspect all inputs on the page to find where Job Start / Job End are located
     const inputsInfo = await page.evaluate(() => {
-        const allInputs = Array.from(document.querySelectorAll('input'));
+        const allInputs = Array.from(document.querySelectorAll('input, select, textarea'));
         return allInputs.map((el, index) => {
-            // Find parent label or container text
-            let labelText = "";
-            let parent = el.parentElement;
-            for (let i = 0; i < 4 && parent; i++) {
-                labelText += " " + parent.innerText;
-                parent = parent.parentElement;
-            }
+            // Get the closest form group or parent row text
+            const container = el.closest('.form-group, .row, .col, div') || el.parentElement;
             return {
                 index: index,
+                tag: el.tagName,
                 id: el.id,
                 name: el.name,
                 type: el.type,
-                className: el.className,
                 placeholder: el.placeholder,
                 ariaLabel: el.getAttribute('aria-label'),
-                surroundingText: labelText.trim().substring(0, 150).replace(/\\s+/g, ' ')
+                containerText: container ? container.innerText.trim().replace(/\s+/g, ' ') : ''
             };
         });
     });
 
-    console.log("Found " + inputsInfo.length + " total inputs on page.");
-    
-    // Filter and print inputs that look relevant
-    const relevant = inputsInfo.filter(i => 
-        i.surroundingText.toLowerCase().includes('job start') || 
-        i.surroundingText.toLowerCase().includes('job end') ||
-        i.surroundingText.toLowerCase().includes('start time') ||
-        i.surroundingText.toLowerCase().includes('end time')
-    );
-
-    console.log("--- RELEVANT INPUTS FOUND ---");
-    console.log(JSON.stringify(relevant, null, 2));
+    console.log("Found " + inputsInfo.length + " total fields.");
+    // Print all fields that have some text or placeholder
+    inputsInfo.forEach(i => {
+        if (i.containerText || i.placeholder || i.id || i.name) {
+            console.log(`[Index ${i.index}] Tag: ${i.tag} | ID: ${i.id} | Name: ${i.name} | Placeholder: ${i.placeholder} | Text: ${i.containerText.substring(0, 100)}`);
+        }
+    });
 }
-"""
-
-with tempfile.NamedTemporaryFile(mode="w", suffix=".js", delete=False, encoding="utf-8") as f:
-    f.write(js_code)
-    temp_path = f.name
-
-try:
-    result = subprocess.run([CLI, f"--s={SESSION}", "run-code", f"--filename={temp_path}"], capture_output=True, text=True, encoding="utf-8")
-    print(result.stdout)
-    if result.stderr:
-        print("STDERR:", result.stderr)
-finally:
-    os.remove(temp_path)
+)(page);
