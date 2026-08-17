@@ -69,6 +69,11 @@ echo "Playwright browsers were NOT installed."
 
 * Uses Playwright extension
 
+## Edge debugging
+
+* Might need to set as on
+* edge://inspect
+
 ## Run command
 
 ```powershell
