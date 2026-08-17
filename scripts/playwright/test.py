@@ -294,66 +294,94 @@ def run_halo_automation(worklog_text, status, start_time, end_time, charge_type)
             }}
 
             // ---------------------------------------------------------
-            // JOB START / END TIMES (ROBUST REACT COMPATIBLE)
+            // JOB START / END TIMES (LABEL-BASED PRECISION)
             // ---------------------------------------------------------
 
             console.log("Job Start Time input: {start_time if start_time else '(Cleared / Empty)'}");
             console.log("Job End Time input: {end_time if end_time else '(Cleared / Empty)'}");
 
-            const timeInputIndexes = await page.locator("input").evaluateAll(inputs => {{
-                const result = [];
-                inputs.forEach((input, index) => {{
-                    const type = (input.getAttribute("type") || "text").toLowerCase();
-                    const style = window.getComputedStyle(input);
-                    const rect = input.getBoundingClientRect();
-                    if (style.display !== "none" && style.visibility !== "hidden" && rect.width > 0 && (type === "text" || type === "time")) {{
-                        const placeholder = (input.getAttribute("placeholder") || "").toLowerCase();
-                        const ariaLabel = (input.getAttribute("aria-label") || "").toLowerCase();
-                        if (!placeholder.includes("search") && !ariaLabel.includes("search")) {{
-                            result.push(index);
-                        }}
-                    }}
-                }});
-                return result;
-            }});
-
-            console.log("Qualified input indices found:", timeInputIndexes);
-
-            if (timeInputIndexes.length < 2) {{
-                throw new Error(
-                    "Could not find the two Halo Worklog time inputs. Found " + timeInputIndexes.length
-                );
-            }}
-
-            const allInputs = page.locator("input");
-            const targetStartIdx = timeInputIndexes[timeInputIndexes.length - 2];
-            const targetEndIdx = timeInputIndexes[timeInputIndexes.length - 1];
-
-            console.log("Using input indices for Start/End:", targetStartIdx, targetEndIdx);
-
-            async function setTimeInput(locator, timeStr) {{
-                await locator.click();
-                await page.waitForTimeout(300);
-                await locator.evaluate(el => {{
-                    el.focus();
-                    el.value = "";
-                    el.dispatchEvent(new Event("input", {{ bubbles: true }}));
-                    el.dispatchEvent(new Event("change", {{ bubbles: true }}));
-                }});
-                if (timeStr) {{
-                    await locator.fill(timeStr);
-                    await page.waitForTimeout(200);
-                    await locator.evaluate((el, val) => {{
-                        el.value = val;
+            async function setTimeInputByLabel(labelText, timeStr) {{
+                const inputLocator = page.locator(`text=${{labelText}}`).locator('xpath=..').locator('input').first();
+                if (await inputLocator.count() > 0) {{
+                    await inputLocator.click();
+                    await page.waitForTimeout(300);
+                    await inputLocator.evaluate(el => {{
+                        el.focus();
+                        el.value = "";
                         el.dispatchEvent(new Event("input", {{ bubbles: true }}));
                         el.dispatchEvent(new Event("change", {{ bubbles: true }}));
-                        el.dispatchEvent(new Event("blur", {{ bubbles: true }}));
-                    }}, timeStr);
+                    }});
+                    if (timeStr) {{
+                        await inputLocator.fill(timeStr);
+                        await page.waitForTimeout(200);
+                        await inputLocator.evaluate((el, val) => {{
+                            el.value = val;
+                            el.dispatchEvent(new Event("input", {{ bubbles: true }}));
+                            el.dispatchEvent(new Event("change", {{ bubbles: true }}));
+                            el.dispatchEvent(new Event("blur", {{ bubbles: true }}));
+                        }}, timeStr);
+                    }}
+                }} else {{
+                    console.log(`Could not find input for label: ${{labelText}}`);
                 }}
             }}
 
-            await setTimeInput(allInputs.nth(targetStartIdx), {start_time!r});
-            await setTimeInput(allInputs.nth(targetEndIdx), {end_time!r});
+            // Fallback index-based setter if label lookup fails
+            async function setTimeInputByIndex(indexFromEnd, timeStr) {{
+                const timeInputIndexes = await page.locator("input").evaluateAll(inputs => {{
+                    const result = [];
+                    inputs.forEach((input, index) => {{
+                        const type = (input.getAttribute("type") || "text").toLowerCase();
+                        const style = window.getComputedStyle(input);
+                        const rect = input.getBoundingClientRect();
+                        if (style.display !== "none" && style.visibility !== "hidden" && rect.width > 0 && (type === "text" || type === "time")) {{
+                            const placeholder = (input.getAttribute("placeholder") || "").toLowerCase();
+                            const ariaLabel = (input.getAttribute("aria-label") || "").toLowerCase();
+                            if (!placeholder.includes("search") && !ariaLabel.includes("search")) {{
+                                result.push(index);
+                            }}
+                        }}
+                    }});
+                    return result;
+                }});
+
+                if (timeInputIndexes.length >= 2) {{
+                    const allInputs = page.locator("input");
+                    const targetIdx = timeInputIndexes[timeInputIndexes.length - indexFromEnd];
+                    const locator = allInputs.nth(targetIdx);
+                    await locator.click();
+                    await page.waitForTimeout(300);
+                    await locator.evaluate(el => {{
+                        el.focus();
+                        el.value = "";
+                        el.dispatchEvent(new Event("input", {{ bubbles: true }}));
+                        el.dispatchEvent(new Event("change", {{ bubbles: true }}));
+                    }});
+                    if (timeStr) {{
+                        await locator.fill(timeStr);
+                        await page.waitForTimeout(200);
+                        await locator.evaluate((el, val) => {{
+                            el.value = val;
+                            el.dispatchEvent(new Event("input", {{ bubbles: true }}));
+                            el.dispatchEvent(new Event("change", {{ bubbles: true }}));
+                            el.dispatchEvent(new Event("blur", {{ bubbles: true }}));
+                        }}, timeStr);
+                    }}
+                }}
+            }}
+
+            // Try setting Job Start Time first, then Job End Time
+            try {{
+                await setTimeInputByLabel("Job Start", {start_time!r});
+            }} catch (e) {{
+                await setTimeInputByIndex(2, {start_time!r});
+            }}
+
+            try {{
+                await setTimeInputByLabel("Job End", {end_time!r});
+            }} catch (e) {{
+                await setTimeInputByIndex(1, {end_time!r});
+            }}
 
             // ---------------------------------------------------------
             // CHARGE TYPE (REACT-SELECT COMPATIBLE)
