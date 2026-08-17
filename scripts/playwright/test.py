@@ -595,29 +595,32 @@ def main():
         default_charge = "Internal Work"
         ohayou_text = "Eire: Email catchup, internal communication, time recording, work logs"
         
-        ohayou_start_time = "" 
-        ohayou_end_time = ""
+        ohayou_start_time = "09:00" 
+        ohayou_end_time = "10:00"
 
         while True:
             ticket, is_ohayou = select_ticket()
             goto_ticket(ticket)
 
             # Main worklog entry loop (supports multiple notes on the same ticket)
+            first_entry = True
             while True:
                 print(f"\n--- Worklog Entry for Ticket {ticket} ---")
                 
-                if is_ohayou:
+                if is_ohayou and first_entry:
                     worklog_text = ohayou_text
                     status = default_status
                     start_time = ohayou_start_time
                     end_time = ohayou_end_time
                     charge_type = default_charge
-                    print(f"Using おはよう defaults:\n  - Worklog: {worklog_text}\n  - Status: {status}\n  - Start Time: {start_time if start_time else '(Empty)'}\n  - End Time: {end_time if end_time else '(Empty)'}\n  - Charge Type: {charge_type}")
+                    print(f"Using おはよう defaults:\n  - Worklog: {worklog_text}\n  - Status: {status}\n  - Start Time: {start_time}\n  - End Time: {end_time}\n  - Charge Type: {charge_type}")
                 else:
                     worklog_text, status, start_time, end_time, charge_type = get_worklog_details(default_status, default_charge)
                 
                 run_halo_automation(worklog_text, status, start_time, end_time, charge_type)
                 
+                first_entry = False
+
                 # Ask if user wants to add another note for this ticket
                 add_more = input("\nDo you want to create another worklog entry for this ticket? (y/N): ").strip().lower()
                 if add_more != 'y':
