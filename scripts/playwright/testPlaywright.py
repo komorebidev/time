@@ -12,6 +12,7 @@ import textwrap
 import time
 
 BASE_URL = "https://support.eiresystems.com/ticket"
+ASSIGNED_TICKETS_URL = "https://support.eiresystems.com/tickets?area=1&mainview=team&viewid=2&selid=75&sellevel=2&selparentid=engineers%20tky"
 SESSION = "halo"
 
 
@@ -120,11 +121,15 @@ atexit.register(cleanup_local_artifacts)
 
 def attach():
     """
-    Attach the CLI session to Microsoft Edge.
+    Attach the CLI session to Microsoft Edge and open the Assigned Tickets view.
     """
     print("\nAttaching to Microsoft Edge...")
     run_cli("attach", "--extension=msedge", check=True)
     time.sleep(1)
+
+    print("\nOpening Assigned Tickets view...")
+    run_cli("goto", ASSIGNED_TICKETS_URL, check=True)
+    time.sleep(1.5)
 
 
 def goto_ticket(ticket):
