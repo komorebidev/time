@@ -18,7 +18,6 @@ SESSION = "halo"
 def find_playwright_cli():
     """
     Find playwright-cli without hard-coding the Windows username.
-    Works on Windows and macOS.
     """
     cli = shutil.which("playwright-cli")
     if cli:
@@ -28,10 +27,7 @@ def find_playwright_cli():
     if cli:
         return cli
 
-    raise FileNotFoundError(
-        "playwright-cli was not found in PATH. "
-        "Make sure @playwright/cli is installed."
-    )
+    raise FileNotFoundError("playwright-cli was not found in PATH.")
 
 
 CLI = find_playwright_cli()
@@ -39,17 +35,14 @@ CLI = find_playwright_cli()
 
 def run_cli(*args, check=True):
     """
-    Run playwright-cli safely across Windows and macOS/Linux.
+    Run playwright-cli safely across platforms.
     """
     if platform.system() == "Windows":
         quoted_args = []
-
         for arg in args:
             s = str(arg)
-
             if not (s.startswith('"') and s.endswith('"')):
                 s = f'"{s}"'
-
             quoted_args.append(s)
 
         cmd_str = f'"{CLI}" "--s={SESSION}" ' + " ".join(quoted_args)
@@ -66,13 +59,8 @@ def run_cli(*args, check=True):
             errors="replace",
             shell=True,
         )
-
     else:
-        command = [
-            CLI,
-            f"--s={SESSION}",
-            *[str(arg) for arg in args]
-        ]
+        command = [CLI, f"--s={SESSION}", *[str(arg) for arg in args]]
 
         print()
         print("> " + " ".join(command))
@@ -100,55 +88,29 @@ def run_cli(*args, check=True):
 
 def remove_readonly(func, path, excinfo):
     """
-    Error handler for shutil.rmtree.
-    Mainly useful on Windows.
+    Error handler for shutil.rmtree to clear read-only bits and retry on Windows.
     """
-    try:
-        os.chmod(path, stat.S_IWRITE)
-    except OSError:
-        pass
-
+    os.chmod(path, stat.S_IWRITE)
     func(path)
 
 
 def cleanup_local_artifacts():
     """
-    Remove local Playwright folders created in the working directory.
-
-    NOTE:
-    This does not remove the Playwright CLI's global installation.
+    Remove local .playwright or session folders created in the working directory
+    with retry logic to handle Windows file locks.
     """
-    folders_to_remove = [
-        ".playwright",
-        ".playwright-cli"
-    ]
+    folders_to_remove = [".playwright", ".playwright-cli"]
 
     for folder in folders_to_remove:
-
         if os.path.exists(folder) and os.path.isdir(folder):
-
             for attempt in range(3):
-
                 try:
-                    shutil.rmtree(
-                        folder,
-                        onerror=remove_readonly
-                    )
-
-                    print(
-                        f"Cleaned up local folder: {folder}"
-                    )
-
+                    shutil.rmtree(folder, onerror=remove_readonly)
+                    print(f"Cleaned up local folder: {folder}")
                     break
-
                 except Exception as e:
-
                     if attempt == 2:
-                        print(
-                            f"Note: Could not fully remove "
-                            f"folder {folder}: {e}"
-                        )
-
+                        print(f"Note: Could not fully remove folder {folder}: {e}")
                     else:
                         time.sleep(0.5)
 
@@ -161,13 +123,7 @@ def attach():
     Attach the CLI session to Microsoft Edge.
     """
     print("\nAttaching to Microsoft Edge...")
-
-    run_cli(
-        "attach",
-        "--extension=msedge",
-        check=True
-    )
-
+    run_cli("attach", "--extension=msedge", check=True)
     time.sleep(1)
 
 
@@ -175,211 +131,88 @@ def goto_ticket(ticket):
     """
     Navigate directly to the requested Halo ticket.
     """
-    url = (
-        f"{BASE_URL}"
-        f"?id={ticket}"
-        f"&showalltickettypes=1"
-    )
+    url = f"{BASE_URL}?id={ticket}&showalltickettypes=1"
 
     print(f"\nOpening ticket {ticket}...")
-
-    run_cli(
-        "goto",
-        url
-    )
-
+    run_cli("goto", url)
     time.sleep(1)
 
 
 def scrape_ticket_options():
     """
-    Intelligently parse ticket IDs, titles, dates, and types
-    from the playwright-cli snapshot output.
+    Intelligently parse ticket IDs, titles, dates, and types from the 
+    playwright-cli snapshot output using strict positional and ticket-type rules.
     """
-
-    print(
-        "\nTaking snapshot to extract tickets and metadata..."
-    )
-
-    output = run_cli(
-        "snapshot",
-        check=True
-    )
-
+    print("\nTaking snapshot to extract tickets and metadata...")
+    output = run_cli("snapshot", check=True)
+    
     tickets = []
     seen_ids = set()
     lines = output.splitlines()
-
+    
     def process_block(ticket_id, block_lines):
-
         if not ticket_id or ticket_id in seen_ids:
             return
-
         seen_ids.add(ticket_id)
-
+        
         title = f"Ticket {ticket_id}"
         date_str = ""
         ticket_type = ""
-
-        # ---------------------------------------------------------
-        # FIRST PASS
-        # Determine ticket type and date
-        # ---------------------------------------------------------
-
+        
+        # First pass: Determine ticket type and date string
         for line in block_lines:
-
-            if re.search(
-                r'\d{1,2}/\d{1,2}/\d{4}\s+\d{2}:\d{2}',
-                line
-            ):
-
-                date_match = re.search(
-                    r'([\d/]+\s+[\d:]+)',
-                    line
-                )
-
+            if re.search(r'\d{1,2}/\d{1,2}/\d{4}\s+\d{2}:\d{2}', line):
+                date_match = re.search(r'([\d/]+\s+[\d:]+)', line)
                 if date_match:
                     date_str = date_match.group(1)
-
-            if any(
-                t in line
-                for t in [
-                    "Service Request",
-                    "Incident",
-                    "Project Support"
-                ]
-            ):
-
-                for t in [
-                    "Service Request",
-                    "Incident",
-                    "Project Support"
-                ]:
-
+            if any(t in line for t in ["Service Request", "Incident", "Project Support"]):
+                for t in ["Service Request", "Incident", "Project Support"]:
                     if t in line:
                         ticket_type = t
                         break
 
-        # ---------------------------------------------------------
-        # COLLECT CANDIDATE TEXT
-        # ---------------------------------------------------------
-
+        # Collect and clean meaningful text lines in exact order of appearance
         ordered_candidates = []
-
         for line in block_lines:
-
-            # Skip duration lines
-            if re.search(
-                r'^\s*-\s*(?:generic|text):\s*\d+:\d+\s*$',
-                line
-            ):
+            # Skip duration lines, dates, types, and UI metadata
+            if re.search(r'^\s*-\s*(?:generic|text):\s*\d+:\d+\s*$', line):
+                continue
+            if re.search(r'\d{1,2}/\d{1,2}/\d{4}\s+\d{2}:\d{2}', line):
+                continue
+            if any(t in line for t in ["Service Request", "Incident", "Project Support"]):
                 continue
 
-            # Skip dates
-            if re.search(
-                r'\d{1,2}/\d{1,2}/\d{4}\s+\d{2}:\d{2}',
-                line
-            ):
-                continue
-
-            # Skip ticket types
-            if any(
-                t in line
-                for t in [
-                    "Service Request",
-                    "Incident",
-                    "Project Support"
-                ]
-            ):
-                continue
-
-            clean_line = re.sub(
-                r'\[ref=e\d+\]',
-                '',
-                line
-            )
-
-            clean_line = re.sub(
-                r'^\s*-\s*(?:generic|text)?\s*(?:"[^"]*")?\s*:\s*',
-                '',
-                clean_line
-            )
-
-            clean_line = re.sub(
-                r'^\s*-\s*(?:generic|text)\b',
-                '',
-                clean_line
-            )
-
+            clean_line = re.sub(r'\[ref=e\d+\]', '', line)
+            clean_line = re.sub(r'^\s*-\s*(?:generic|text)?\s*(?:"[^"]*")?\s*:\s*', '', clean_line)
+            clean_line = re.sub(r'^\s*-\s*(?:generic|text)\b', '', clean_line)
             clean_line = clean_line.strip('" :')
-
+            
             if not clean_line or len(clean_line) < 2:
                 continue
-
+                
             lower_line = clean_line.lower()
-
-            if re.match(
-                r'^00\d{5}$',
-                clean_line
-            ):
+            if re.match(r'^00\d{5}$', clean_line):
                 continue
-
-            if re.match(
-                r'^\d+:\d+$',
-                clean_line
-            ):
+            if re.match(r'^\d+:\d+$', clean_line):
                 continue
-
-            if any(
-                kw in lower_line
-                for kw in [
-                    'cursor=pointer',
-                    'checkbox',
-                    'bulk select',
-                    'available',
-                    'on hold',
-                    'completed',
-                    'low',
-                    'medium',
-                    'high'
-                ]
-            ):
+            if any(kw in lower_line for kw in ['cursor=pointer', 'checkbox', 'bulk select', 'available', 'on hold', 'completed', 'low', 'medium', 'high']):
                 continue
-
             if len(clean_line) <= 3 and clean_line.isupper():
                 continue
 
-            ordered_candidates.append(
-                clean_line
-            )
+            ordered_candidates.append(clean_line)
 
-        # ---------------------------------------------------------
-        # POSITIONAL / TYPE-AWARE RESOLUTION
-        # ---------------------------------------------------------
-
+        # Positional / Type-aware resolution based on snapshot layout structure
         if ticket_type == "Project Support":
-
-            path_candidates = [
-                c for c in ordered_candidates
-                if '/' in c
-            ]
-
+            path_candidates = [c for c in ordered_candidates if '/' in c]
             if path_candidates:
                 title = path_candidates[0]
-
             elif ordered_candidates:
                 title = ordered_candidates[-1]
-
         else:
-
-            non_path_candidates = [
-                c for c in ordered_candidates
-                if '/' not in c
-            ]
-
+            non_path_candidates = [c for c in ordered_candidates if '/' not in c]
             if non_path_candidates:
                 title = non_path_candidates[-1]
-
             elif ordered_candidates:
                 title = ordered_candidates[-1]
 
@@ -392,68 +225,36 @@ def scrape_ticket_options():
 
     active_id = None
     block_buffer = []
-
+    
     for line in lines:
-
-        id_match = re.search(
-            r'"(00\d{5})"',
-            line
-        )
-
+        id_match = re.search(r'"(00\d{5})"', line)
         if id_match:
-
             if active_id:
-                process_block(
-                    active_id,
-                    block_buffer
-                )
-
+                process_block(active_id, block_buffer)
             active_id = id_match.group(1)
             block_buffer = []
-
         elif active_id:
-
             block_buffer.append(line)
-
-            if (
-                "cursor=pointer" in line
-                and len(block_buffer) > 4
-            ):
-
-                process_block(
-                    active_id,
-                    block_buffer
-                )
-
+            if "cursor=pointer" in line and len(block_buffer) > 4:
+                process_block(active_id, block_buffer)
                 active_id = None
                 block_buffer = []
-
+                
     if active_id:
-        process_block(
-            active_id,
-            block_buffer
-        )
-
+        process_block(active_id, block_buffer)
+        
     return tickets
 
 
-def run_halo_automation(
-    worklog_text,
-    status,
-    start_time,
-    end_time,
-    charge_type
-):
+def run_halo_automation(worklog_text, status, start_time, end_time, charge_type):
     """
-    Run the HaloPSA Worklog automation using Playwright.
+    Run the actual HaloPSA Worklog automation using Playwright code.
     """
-
     start_fill_code = (
         f"await allInputs.nth(timeInputIndexes[0]).fill({start_time!r});"
         if start_time
         else "// Start time left unchanged"
     )
-
     end_fill_code = (
         f"await allInputs.nth(timeInputIndexes[1]).fill({end_time!r});"
         if end_time
@@ -471,7 +272,6 @@ def run_halo_automation(
             }}).click();
 
             await page.waitForTimeout(1500);
-
 
             // ---------------------------------------------------------
             // WORKLOG TEXT
@@ -492,14 +292,11 @@ def run_halo_automation(
                 {worklog_text!r}
             );
 
-
             // ---------------------------------------------------------
             // STATUS
             // ---------------------------------------------------------
 
-            console.log(
-                "Setting status: {status}"
-            );
+            console.log("Setting status: {status}");
 
             const statusCombobox = page.getByRole(
                 "combobox",
@@ -507,11 +304,6 @@ def run_halo_automation(
             );
 
             await statusCombobox.click();
-
-            // FIX:
-            // Use the dropdown option instead of getByText().
-            // This prevents strict-mode violations when the same
-            // status text exists elsewhere on the page.
 
             await page.getByRole(
                 "option",
@@ -521,99 +313,41 @@ def run_halo_automation(
                 }}
             ).click();
 
-
             // ---------------------------------------------------------
             // JOB START / END TIMES
             // ---------------------------------------------------------
 
-            console.log(
-                "Job Start Time input: "
-                + "{start_time if start_time else '(Leave unchanged)'}"
-            );
+            console.log("Job Start Time input: {start_time if start_time else '(Leave unchanged)'}");
+            console.log("Job End Time input: {end_time if end_time else '(Leave unchanged)'}");
 
-            console.log(
-                "Job End Time input: "
-                + "{end_time if end_time else '(Leave unchanged)'}"
-            );
-
-            const timeInputIndexes =
-                await page.locator("input").evaluateAll(
-                    inputs => {{
-
-                        const result = [];
-
-                        inputs.forEach(
-                            (input, index) => {{
-
-                                const value =
-                                    input.value || "";
-
-                                const type =
-                                    (
-                                        input.getAttribute(
-                                            "type"
-                                        ) || "text"
-                                    ).toLowerCase();
-
-                                const style =
-                                    window.getComputedStyle(
-                                        input
-                                    );
-
-                                if (
-                                    style.display !== "none"
-                                    &&
-                                    style.visibility !== "hidden"
-                                    &&
-                                    (
-                                        type === "text"
-                                        ||
-                                        type === "time"
-                                    )
-                                ) {{
-
-                                    if (
-                                        value.includes(":")
-                                        &&
-                                        !value.includes("-")
-                                        &&
-                                        !value.includes("/")
-                                    ) {{
-
-                                        result.push(index);
-
-                                    }}
-                                }}
-                            }}
-                        );
-
-                        return result;
+            const timeInputIndexes = await page.locator("input").evaluateAll(inputs => {{
+                const result = [];
+                inputs.forEach((input, index) => {{
+                    const value = input.value || "";
+                    const type = (input.getAttribute("type") || "text").toLowerCase();
+                    const style = window.getComputedStyle(input);
+                    
+                    if (style.display !== "none" && style.visibility !== "hidden" && (type === "text" || type === "time")) {{
+                        if (value.includes(":") && !value.includes("-") && !value.includes("/")) {{
+                            result.push(index);
+                        }}
                     }}
-                );
+                }});
+                return result;
+            }});
 
-            console.log(
-                "Time input indices found:",
-                timeInputIndexes
-            );
+            console.log("Time input indices found:", timeInputIndexes);
 
             if (timeInputIndexes.length < 2) {{
-
                 throw new Error(
-                    "Could not find the two Halo Worklog "
-                    + "time inputs. Found "
-                    + timeInputIndexes.length
+                    "Could not find the two Halo Worklog time inputs. Found " + timeInputIndexes.length
                 );
-
             }}
 
-            const allInputs =
-                page.locator("input");
-
+            const allInputs = page.locator("input");
 
             {start_fill_code}
-
             {end_fill_code}
-
 
             // ---------------------------------------------------------
             // CHARGE TYPE
@@ -623,16 +357,12 @@ def run_halo_automation(
                 "Setting charge type: {charge_type}"
             );
 
-            const chargeTypeCombobox =
-                page.getByRole(
-                    "combobox",
-                    {{ name: "Charge Type *" }}
-                );
+            const chargeTypeCombobox = page.getByRole(
+                "combobox",
+                {{ name: "Charge Type *" }}
+            );
 
             await chargeTypeCombobox.click();
-
-            // FIX:
-            // Use the dropdown option instead of getByText().
 
             await page.getByRole(
                 "option",
@@ -642,12 +372,190 @@ def run_halo_automation(
                 }}
             ).click();
 
-
             // ---------------------------------------------------------
             // FINAL CHECK
             // ---------------------------------------------------------
 
-            console.log("Worklog automation script ready.");
+            console.log(
+                "Worklog fields populated. Saving..."
+            );
+
+            await page.waitForTimeout(500);
+
+            await page.getByRole(
+                "button",
+                {{ name: "Save", exact: true }}
+            ).click();
+
+            await page.waitForTimeout(1500);
+
+            console.log("Worklog saved.");
+
         }}
         """
     )
+
+    temp_path = None
+
+    try:
+        with tempfile.NamedTemporaryFile(
+            mode="w",
+            suffix=".js",
+            prefix="halo_worklog_",
+            delete=False,
+            encoding="utf-8",
+        ) as temp_file:
+
+            temp_file.write(js_code)
+            temp_path = temp_file.name
+
+        print("\nRunning Halo automation...")
+
+        run_cli(
+            "run-code",
+            f"--filename={temp_path}",
+        )
+
+    finally:
+        if temp_path and os.path.exists(temp_path):
+            try:
+                os.remove(temp_path)
+            except OSError:
+                pass
+
+
+def take_snapshot():
+    """
+    Take a final snapshot so we can verify the result.
+    """
+    print("\nTaking final snapshot...")
+    run_cli("snapshot")
+
+
+def main():
+    print()
+    print("HaloPSA Worklog Automation")
+    print("==========================")
+
+    try:
+        attach()
+
+        ticket = ""
+        choice = input(
+            "\n[1] Enter Ticket ID manually\n"
+            "[2] Scrape Ticket IDs & metadata from current snapshot view\n"
+            "Select option [1/2]: "
+        ).strip()
+
+        if choice == "2":
+            tickets = scrape_ticket_options()
+            if tickets:
+                print(f"\nFound {len(tickets)} tickets on the current page:")
+                for idx, t in enumerate(tickets, 1):
+                    date_info = f" [{t['date']}]" if t['date'] else ""
+                    type_info = f" ({t['type']})" if t['type'] else ""
+                    print(f"  [{idx}] {t['id']}{date_info}{type_info} - {t['title']}")
+                
+                sel = input("\nEnter selection number or type a Ticket ID directly: ").strip()
+                if sel.isdigit() and 1 <= int(sel) <= len(tickets):
+                    ticket = tickets[int(sel) - 1]["id"]
+                    print(f"Selected Ticket ID: {ticket}")
+                else:
+                    ticket = sel
+            else:
+                print("No tickets could be automatically scraped from this snapshot.")
+
+        while not ticket or not ticket.isdigit():
+            ticket = input("\nEnter Ticket Number: ").strip()
+            if not ticket or not ticket.isdigit():
+                print("Please enter a valid numeric ticket number.")
+                ticket = ""
+
+        worklog_text = ""
+        while not worklog_text:
+            worklog_text = input("Worklog text (Required): ").strip()
+            if not worklog_text:
+                print("Worklog text cannot be empty.")
+
+        # Status selection with '?' option menu
+        status_options = [
+            "In Progress",
+            "Completed (On Hold)",
+            "On Hold"
+        ]
+        default_status = "Completed (On Hold)"
+        status = default_status
+
+        while True:
+            status_input = input(f"Status [? for options] [{default_status}]: ").strip()
+            if status_input == "?":
+                print("\nAvailable Statuses:")
+                print("-" * 25)
+                for idx, opt in enumerate(status_options, 1):
+                    print(f"  [{idx}] {opt}")
+                print("-" * 25)
+                sel = input("Select option number: ").strip()
+                if sel.isdigit() and 1 <= int(sel) <= len(status_options):
+                    status = status_options[int(sel) - 1]
+                    break
+                else:
+                    print("Invalid selection. Try again or enter custom text.")
+            elif not status_input:
+                status = default_status
+                break
+            else:
+                status = status_input
+                break
+
+        start_time = input("Start time [Leave unchanged, e.g. 09:00]: ").strip()
+        end_time = input("End time [Leave unchanged, e.g. 10:00]: ").strip()
+
+        # Charge type selection with '?' option menu
+        charge_options = [
+            "Project Work- Managed Services",
+            "Research (work-specific)",
+            "Professional Development",
+            "Internal Work"
+        ]
+        default_charge = "Internal Work"
+        charge_type = default_charge
+
+        while True:
+            charge_input = input(f"Charge type [? for options] [{default_charge}]: ").strip()
+            if charge_input == "?":
+                print("\nAvailable Charge Types:")
+                print("-" * 35)
+                for idx, opt in enumerate(charge_options, 1):
+                    print(f"  [{idx}] {opt}")
+                print("-" * 35)
+                sel = input("Select option number: ").strip()
+                if sel.isdigit() and 1 <= int(sel) <= len(charge_options):
+                    charge_type = charge_options[int(sel) - 1]
+                    break
+                else:
+                    print("Invalid selection. Try again or enter custom text.")
+            elif not charge_input:
+                charge_type = default_charge
+                break
+            else:
+                charge_type = charge_input
+                break
+
+        goto_ticket(ticket)
+        run_halo_automation(worklog_text, status, start_time, end_time, charge_type)
+        take_snapshot()
+
+        print()
+        print("================================")
+        print("Worklog automation completed.")
+        print("================================")
+
+    except Exception as exc:
+        print()
+        print("ERROR:")
+        print(exc)
+        sys.exit(1)
+
+
+if __name__ == "__main__":
+    main()
