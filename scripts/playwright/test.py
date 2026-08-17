@@ -239,7 +239,7 @@ def scrape_ticket_options():
 
 def run_halo_automation(worklog_text, status, start_time, end_time, charge_type):
     """
-    Run the actual HaloPSA Worklog automation using direct value updates without focusing/triggering calendar pickers.
+    Run the actual HaloPSA Worklog automation using native property setters for React state updates.
     """
     js_code = textwrap.dedent(
         f"""
@@ -294,38 +294,33 @@ def run_halo_automation(worklog_text, status, start_time, end_time, charge_type)
             }}
 
             // ---------------------------------------------------------
-            // JOB START / END TIMES (DIRECT TIME FIELD UPDATE WITHOUT FOCUS)
+            // JOB START / END TIMES (NATIVE VALUE SETTER & EVENTS)
             // ---------------------------------------------------------
 
             console.log("Job Start Time input: {start_time if start_time else '(Leave unchanged)'}");
             console.log("Job End Time input: {end_time if end_time else '(Leave unchanged)'}");
 
             await page.evaluate(({{ startTime, endTime }}) => {{
-                const inputs = Array.from(document.querySelectorAll('input[type="text"], input:not([type])'));
-
-                if (startTime) {{
-                    const startInput = inputs.find(el => {{
-                        const parent = el.closest('.form-group, .row, div');
-                        return parent && parent.textContent.includes('Job Start');
-                    }});
-                    if (startInput) {{
-                        startInput.value = startTime;
-                        startInput.dispatchEvent(new Event('input', {{ bubbles: true }}));
-                        startInput.dispatchEvent(new Event('change', {{ bubbles: true }}));
+                const setInputValue = (labelText, val) => {{
+                    if (!val) return;
+                    const inputs = Array.from(document.querySelectorAll('input[type="text"], input:not([type]), input[type="search"]'));
+                    
+                    for (const input of inputs) {{
+                        const container = input.closest('.form-group, .row, .col, div');
+                        if (container && container.textContent.includes(labelText)) {{
+                            const nativeInputValueSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value").set;
+                            nativeInputValueSetter.call(input, val);
+                            
+                            input.dispatchEvent(new Event('input', {{ bubbles: true }}));
+                            input.dispatchEvent(new Event('change', {{ bubbles: true }}));
+                            input.dispatchEvent(new Event('blur', {{ bubbles: true }}));
+                            return;
+                        }}
                     }}
-                }}
+                }};
 
-                if (endTime) {{
-                    const endInput = inputs.find(el => {{
-                        const parent = el.closest('.form-group, .row, div');
-                        return parent && parent.textContent.includes('Job End');
-                    }});
-                    if (endInput) {{
-                        endInput.value = endTime;
-                        endInput.dispatchEvent(new Event('input', {{ bubbles: true }}));
-                        endInput.dispatchEvent(new Event('change', {{ bubbles: true }}));
-                    }}
-                }}
+                setInputValue('Job Start', startTime);
+                setInputValue('Job End', endTime);
             }}, {{ startTime: {start_time!r}, endTime: {end_time!r} }});
 
             // ---------------------------------------------------------
