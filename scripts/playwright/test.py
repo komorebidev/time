@@ -597,8 +597,8 @@ def main():
         default_status = "Completed (On Hold)"
         default_charge = "Internal Work"
         ohayou_text = "Eire: Email catchup, internal communication, time recording, work logs"
-        ohayou_start_time = "" 
-        ohayou_end_time = ""
+        ohayou_start_time = "09:00" 
+        ohayou_end_time = "10:00"
 
         while True:
             ticket, is_ohayou = select_ticket()
@@ -613,7 +613,7 @@ def main():
                     start_time = ohayou_start_time
                     end_time = ohayou_end_time
                     charge_type = default_charge
-                    print(f"Using おはよう defaults:\n  - Worklog: {worklog_text}\n  - Status: {status}\n  - Start Time: (Leave Unchanged)\n  - End Time: (Leave Unchanged)\n  - Charge Type: {charge_type}")
+                    print(f"Using おはよう defaults:\n  - Worklog: {worklog_text}\n  - Status: {status}\n  - Start Time: {start_time}\n  - End Time: {end_time}\n  - Charge Type: {charge_type}")
                 else:
                     worklog_text, status, start_time, end_time, charge_type = get_worklog_details(default_status, default_charge)
                 
