@@ -241,17 +241,6 @@ def run_halo_automation(worklog_text, status, start_time, end_time, charge_type)
     """
     Run the actual HaloPSA Worklog automation using Playwright code with robust dropdown and submit handling.
     """
-    start_fill_code = (
-        f"await allInputs.nth(targetStartIdx).fill({start_time!r});"
-        if start_time
-        else "await allInputs.nth(targetStartIdx).fill('');"
-    )
-    end_fill_code = (
-        f"await allInputs.nth(targetEndIdx).fill({end_time!r});"
-        if end_time
-        else "await allInputs.nth(targetEndIdx).fill('');"
-    )
-
     js_code = textwrap.dedent(
         f"""
         async page => {{
@@ -305,7 +294,7 @@ def run_halo_automation(worklog_text, status, start_time, end_time, charge_type)
             }}
 
             // ---------------------------------------------------------
-            // JOB START / END TIMES
+            // JOB START / END TIMES (ROBUST REACT COMPATIBLE)
             // ---------------------------------------------------------
 
             console.log("Job Start Time input: {start_time if start_time else '(Cleared / Empty)'}");
@@ -342,8 +331,29 @@ def run_halo_automation(worklog_text, status, start_time, end_time, charge_type)
 
             console.log("Using input indices for Start/End:", targetStartIdx, targetEndIdx);
 
-            {start_fill_code}
-            {end_fill_code}
+            async function setTimeInput(locator, timeStr) {{
+                await locator.click();
+                await page.waitForTimeout(300);
+                await locator.evaluate(el => {{
+                    el.focus();
+                    el.value = "";
+                    el.dispatchEvent(new Event("input", {{ bubbles: true }}));
+                    el.dispatchEvent(new Event("change", {{ bubbles: true }}));
+                }});
+                if (timeStr) {{
+                    await locator.fill(timeStr);
+                    await page.waitForTimeout(200);
+                    await locator.evaluate((el, val) => {{
+                        el.value = val;
+                        el.dispatchEvent(new Event("input", {{ bubbles: true }}));
+                        el.dispatchEvent(new Event("change", {{ bubbles: true }}));
+                        el.dispatchEvent(new Event("blur", {{ bubbles: true }}));
+                    }}, timeStr);
+                }}
+            }}
+
+            await setTimeInput(allInputs.nth(targetStartIdx), {start_time!r});
+            await setTimeInput(allInputs.nth(targetEndIdx), {end_time!r});
 
             // ---------------------------------------------------------
             // CHARGE TYPE (REACT-SELECT COMPATIBLE)
