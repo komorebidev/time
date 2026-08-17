@@ -239,19 +239,8 @@ def scrape_ticket_options():
 
 def run_halo_automation(worklog_text, status, start_time, end_time, charge_type):
     """
-    Run the actual HaloPSA Worklog automation using Playwright code with snapshot-based time input targeting.
+    Run the actual HaloPSA Worklog automation using direct value updates without focusing/triggering calendar pickers.
     """
-    start_fill_code = (
-        f"await startTimeInput.fill({start_time!r});"
-        if start_time
-        else "// Start time left unchanged"
-    )
-    end_fill_code = (
-        f"await endTimeInput.fill({end_time!r});"
-        if end_time
-        else "// End time left unchanged"
-    )
-
     js_code = textwrap.dedent(
         f"""
         async page => {{
@@ -305,17 +294,39 @@ def run_halo_automation(worklog_text, status, start_time, end_time, charge_type)
             }}
 
             // ---------------------------------------------------------
-            // JOB START / END TIMES (SNAPSHOT STRUCTURE BASED)
+            // JOB START / END TIMES (DIRECT TIME FIELD UPDATE WITHOUT FOCUS)
             // ---------------------------------------------------------
 
             console.log("Job Start Time input: {start_time if start_time else '(Leave unchanged)'}");
             console.log("Job End Time input: {end_time if end_time else '(Leave unchanged)'}");
 
-            const startTimeInput = page.locator('text=Job Start').locator('xpath=..').locator('input[type="text"], input:not([type])').last();
-            const endTimeInput = page.locator('text=Job End').locator('xpath=..').locator('input[type="text"], input:not([type])').last();
+            await page.evaluate(({{ startTime, endTime }}) => {{
+                const inputs = Array.from(document.querySelectorAll('input[type="text"], input:not([type])'));
 
-            {start_fill_code}
-            {end_fill_code}
+                if (startTime) {{
+                    const startInput = inputs.find(el => {{
+                        const parent = el.closest('.form-group, .row, div');
+                        return parent && parent.textContent.includes('Job Start');
+                    }});
+                    if (startInput) {{
+                        startInput.value = startTime;
+                        startInput.dispatchEvent(new Event('input', {{ bubbles: true }}));
+                        startInput.dispatchEvent(new Event('change', {{ bubbles: true }}));
+                    }}
+                }}
+
+                if (endTime) {{
+                    const endInput = inputs.find(el => {{
+                        const parent = el.closest('.form-group, .row, div');
+                        return parent && parent.textContent.includes('Job End');
+                    }});
+                    if (endInput) {{
+                        endInput.value = endTime;
+                        endInput.dispatchEvent(new Event('input', {{ bubbles: true }}));
+                        endInput.dispatchEvent(new Event('change', {{ bubbles: true }}));
+                    }}
+                }}
+            }}, {{ startTime: {start_time!r}, endTime: {end_time!r} }});
 
             // ---------------------------------------------------------
             // CHARGE TYPE (REACT-SELECT COMPATIBLE)
