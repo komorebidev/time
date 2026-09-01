@@ -29,40 +29,49 @@ if (-not (Test-Path $LocalFolder)) {
 $script:StartedOutlookByScript = $false
 
 # ============================================================
-# CONNECT TO OUTLOOK (PURE COM BACKGROUND INSTANTIATION)
+# CONNECT TO OUTLOOK (BULLETPROOF COM INSTANTIATION)
 # ============================================================
 
 function Connect-Outlook {
     Write-Output ""
-    Write-Output "Connecting to Outlook via background COM..."
+    Write-Output "Connecting to Outlook via COM..."
 
     $outlook = $null
     $maxAttempts = 10
 
     for ($attempt = 1; $attempt -le $maxAttempts; $attempt++) {
         try {
-            $outlook = [Runtime.InteropServices.Marshal]::GetActiveObject("Outlook.Application") -as [Microsoft.Office.Interop.Outlook.Application]
-            if ($null -eq $outlook) {
-                throw "No active instance found."
+            # Check if Outlook process is already running
+            $outlookProcess = Get-Process -Name "OUTLOOK" -ErrorAction SilentlyContinue
+            
+            if ($outlookProcess) {
+                try {
+                    $outlook = [Marshal]::GetActiveObject("Outlook.Application")
+                } catch {
+                    # Fallback if Marshal fails while process exists
+                    $outlook = New-Object -ComObject Outlook.Application
+                }
+            } else {
+                $outlook = New-Object -ComObject Outlook.Application
+                $script:StartedOutlookByScript = $true
             }
-            Write-Output "[OK] Connected to active Outlook instance"
-            break
+
+            if ($null -ne $outlook -and $outlook -isnot [string]) {
+                # Test the COM object by pulling Namespace
+                $ns = $outlook.GetNamespace("MAPI")
+                if ($null -ne $ns) {
+                    [Runtime.InteropServices.Marshal]::ReleaseComObject($ns) | Out-Null
+                    Write-Output "[OK] Connected to Outlook successfully."
+                    break
+                }
+            }
         }
         catch {
-            try {
-                $outlookType = [Type]::GetTypeFromProgID("Outlook.Application")
-                $outlook = [Activator]::CreateInstance($outlookType)
-                $script:StartedOutlookByScript = $true
-                Write-Output "[OK] Created background Outlook COM instance"
-                break
+            Write-Output "Attempt $attempt of $maxAttempts failed to bind Outlook COM. Retrying..."
+            if ($attempt -eq $maxAttempts) {
+                throw "Failed to initialize Outlook COM interface: $_"
             }
-            catch {
-                Write-Output "Attempt $attempt of $maxAttempts failed to bind Outlook COM. Retrying..."
-                if ($attempt -eq $maxAttempts) {
-                    throw "Failed to initialize Outlook COM interface: $_"
-                }
-                Start-Sleep -Seconds 3
-            }
+            Start-Sleep -Seconds 3
         }
     }
 
@@ -159,7 +168,11 @@ function Find-ExistingWorklogEvent {
             $item = $null
             try {
                 $item = $items.Item($index)
-                if ($item.Class -ne 26) { continue }
+                if ($null -eq $item) { continue }
+                if ($item.Class -ne 26) { 
+                    [Runtime.InteropServices.Marshal]::ReleaseComObject($item) | Out-Null
+                    continue 
+                }
 
                 $property = $null
                 try {
@@ -174,8 +187,12 @@ function Find-ExistingWorklogEvent {
                     $itemStart = [datetime]$item.Start
                     if ($itemStart.Date -eq $Start.Date) { return $item }
                 }
+                
+                [Runtime.InteropServices.Marshal]::ReleaseComObject($item) | Out-Null
             }
-            catch {}
+            catch {
+                if ($item) { [Runtime.InteropServices.Marshal]::ReleaseComObject($item) | Out-Null }
+            }
         }
     }
     finally {
@@ -328,7 +345,7 @@ function Invoke-ProcessIcs {
     finally {
         if ($calendar) { [Runtime.InteropServices.Marshal]::ReleaseComObject($calendar) | Out-Null }
         if ($namespace) { [Runtime.InteropServices.Marshal]::ReleaseComObject($namespace) | Out-Null }
-        if ($outlook) { [Runtime.InteropServices.Marshal]::ReleaseComObject($outlook) | Out-Null }
+        if ($outlook -and $outlook -isnot [string]) { [Runtime.InteropServices.Marshal]::ReleaseComObject($outlook) | Out-Null }
 
         [GC]::Collect()
         [GC]::WaitForPendingFinalizers()
