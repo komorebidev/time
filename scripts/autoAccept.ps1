@@ -1,21 +1,20 @@
-# ============================================================
-# Worklog ICS -> Outlook Calendar (OneDrive Polling / Pure COM)
+﻿# ============================================================
+# Worklog ICS -> Outlook Calendar (FileSystemWatcher / Pure COM)
 # ============================================================
 
 $ErrorActionPreference = "Stop"
 
-# Force UTF-8 encoding for console output
+# Force UTF-8 encoding for console output and standard streams to prevent mojibake
 [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
 $OutputEncoding = [System.Text.Encoding]::UTF8
 
 # ============================================================
-# CONFIGURATION (Dynamically locates OneDrive to avoid dash issues)
+# CONFIGURATION (Dynamically locates OneDrive to avoid dash/encoding bugs)
 # ============================================================
 
 $BaseOneDrive = Get-ChildItem "$env:USERPROFILE\OneDrive*" | Where-Object { $_.Name -like "*エイラシステム*" } | Select-Object -ExpandProperty FullName
 
 if (-not $BaseOneDrive) {
-    # Fallback if dynamic search fails
     $BaseOneDrive = "$env:USERPROFILE\OneDrive - エイラシステム株式会社"
 }
 
@@ -34,6 +33,7 @@ $script:StartedOutlookByScript = $false
 # ============================================================
 
 function Connect-Outlook {
+    Write-Output ""
     Write-Output "Connecting to Outlook via background COM..."
 
     $outlook = $null
@@ -204,7 +204,7 @@ function Invoke-ProcessIcs {
         Write-Output ""
         Write-Output "[DETECTED] Processing local ICS file..."
 
-        Start-Sleep -Seconds 2
+        Start-Sleep -Seconds 3
 
         $outlook = Connect-Outlook
         $namespace = $outlook.GetNamespace("MAPI")
@@ -345,32 +345,57 @@ function Invoke-ProcessIcs {
 }
 
 # ============================================================
-# BACKGROUND POLLING LOOP (Replaces unreliable FileSystemWatcher)
+# FILE SYSTEM WATCHER SETUP
 # ============================================================
+
+$watcher = New-Object System.IO.FileSystemWatcher
+$watcher.Path = $LocalFolder
+$watcher.Filter = $Filter
+$watcher.IncludeSubdirectories = $false
+$watcher.EnableRaisingEvents = $true
 
 Write-Output ""
 Write-Output "========================================"
-Write-Output "BACKGROUND ICS POLLING ACTIVE"
+Write-Output "BACKGROUND ICS WATCHER ACTIVE"
 Write-Output "Watching Folder: $LocalFolder"
 Write-Output "========================================"
 Write-Output "Keep this window minimized to run in background."
 
-while ($true) {
-    if (Test-Path $TargetIcsFile) {
-        # Check if file is fully written/unlocked by OneDrive
-        $ready = $false
+$action = {
+    $path = $Event.SourceEventArgs.FullPath
+    
+    $success = $false
+    for ($i = 1; $i -le 5; $i++) {
         try {
-            $stream = [System.IO.File]::Open($TargetIcsFile, 'Open', 'Read', 'None')
-            $stream.Close()
-            $stream.Dispose()
-            $ready = $true
+            if (Test-Path $path) {
+                $stream = [System.IO.File]::Open($path, 'Open', 'Read', 'None')
+                $stream.Close()
+                $stream.Dispose()
+                $success = $true
+                break
+            }
         } catch {
-            # File is still syncing/locked by OneDrive
-        }
-
-        if ($ready) {
-            Invoke-ProcessIcs -FilePath $TargetIcsFile
+            Start-Sleep -Seconds 2
         }
     }
-    Start-Sleep -Seconds 3
+
+    if ($success) {
+        Invoke-ProcessIcs -FilePath $path
+    }
+}
+
+Register-ObjectEvent $watcher "Created" -Action $action | Out-Null
+Register-ObjectEvent $watcher "Changed" -Action $action | Out-Null
+
+if (Test-Path $TargetIcsFile) {
+    Write-Output "[INFO] Existing file detected on startup. Processing..."
+    Invoke-ProcessIcs -FilePath $TargetIcsFile
+}
+
+try {
+    while ($true) { Start-Sleep -Seconds 1 }
+}
+finally {
+    Unregister-Event -SourceIdentifier *
+    $watcher.Dispose()
 }
