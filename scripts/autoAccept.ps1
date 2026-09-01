@@ -1,15 +1,14 @@
 ﻿# ============================================================
-# Worklog ICS -> Outlook Calendar (FileSystemWatcher / Pure COM)
+# Worklog ICS -> Outlook Calendar (FileSystemWatcher / Safe STA Main Loop)
 # ============================================================
 
 $ErrorActionPreference = "Stop"
 
-# Force UTF-8 encoding for console output and standard streams to prevent mojibake
 [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
 $OutputEncoding = [System.Text.Encoding]::UTF8
 
 # ============================================================
-# CONFIGURATION (Dynamically locates OneDrive to avoid dash/encoding bugs)
+# CONFIGURATION
 # ============================================================
 
 $BaseOneDrive = Get-ChildItem "$env:USERPROFILE\OneDrive*" | Where-Object { $_.Name -like "*エイラシステム*" } | Select-Object -ExpandProperty FullName
@@ -27,6 +26,7 @@ if (-not (Test-Path $LocalFolder)) {
 }
 
 $script:StartedOutlookByScript = $false
+$script:ProcessTriggered = $false
 
 # ============================================================
 # SAFE COM RELEASE HELPER
@@ -45,11 +45,10 @@ function Release-ComObject {
 }
 
 # ============================================================
-# CONNECT TO OUTLOOK (BULLETPROOF COM INSTANTIATION)
+# CONNECT TO OUTLOOK (MAIN THREAD STA SAFE)
 # ============================================================
 
 function Connect-Outlook {
-    Write-Output ""
     Write-Output "Connecting to Outlook via COM..."
 
     $outlook = $null
@@ -57,26 +56,16 @@ function Connect-Outlook {
 
     for ($attempt = 1; $attempt -le $maxAttempts; $attempt++) {
         try {
-            # Try to get active instance first via Marshal
             try {
                 $outlook = [System.Runtime.InteropServices.Marshal]::GetActiveObject("Outlook.Application")
             } catch {
-                $outlook = $null
-            }
-
-            # If no active instance, create a new one via Activator/ProgID
-            if ($null -eq $outlook -or $outlook -is [string]) {
-                $outlookType = [Type]::GetTypeFromProgID("Outlook.Application")
-                if ($null -ne $outlookType) {
-                    $outlook = [Activator]::CreateInstance($outlookType)
-                    if ($null -eq (Get-Process -Name "OUTLOOK" -ErrorAction SilentlyContinue)) {
-                        $script:StartedOutlookByScript = $true
-                    }
+                $outlook = New-Object -ComObject Outlook.Application
+                if ($null -eq (Get-Process -Name "OUTLOOK" -ErrorAction SilentlyContinue)) {
+                    $script:StartedOutlookByScript = $true
                 }
             }
 
-            # Verify it's a valid COM object and not a string/garbage
-            if ($null -ne $outlook -and $outlook -isnot [string]) {
+            if ($null -ne $outlook) {
                 $ns = $outlook.GetNamespace("MAPI")
                 if ($null -ne $ns) {
                     Release-ComObject $ns
@@ -241,7 +230,7 @@ function Invoke-ProcessIcs {
         Write-Output ""
         Write-Output "[DETECTED] Processing local ICS file..."
 
-        Start-Sleep -Seconds 3
+        Start-Sleep -Seconds 2
 
         $outlook = Connect-Outlook
         $namespace = $outlook.GetNamespace("MAPI")
@@ -382,7 +371,7 @@ function Invoke-ProcessIcs {
 }
 
 # ============================================================
-# FILE SYSTEM WATCHER SETUP
+# FILE SYSTEM WATCHER SETUP (THREAD-SAFE FLAG TRIGGER)
 # ============================================================
 
 $watcher = New-Object System.IO.FileSystemWatcher
@@ -417,7 +406,7 @@ $action = {
     }
 
     if ($success) {
-        Invoke-ProcessIcs -FilePath $path
+        $script:ProcessTriggered = $true
     }
 }
 
@@ -430,7 +419,13 @@ if (Test-Path $TargetIcsFile) {
 }
 
 try {
-    while ($true) { Start-Sleep -Seconds 1 }
+    while ($true) {
+        if ($script:ProcessTriggered) {
+            $script:ProcessTriggered = $false
+            Invoke-ProcessIcs -FilePath $TargetIcsFile
+        }
+        Start-Sleep -Seconds 1
+    }
 }
 finally {
     Unregister-Event -SourceIdentifier *
