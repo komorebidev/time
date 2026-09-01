@@ -1,20 +1,28 @@
-﻿============================================================
-Worklog ICS -> Outlook Calendar
-FileSystemWatcher / Safe STA Main Loop
-============================================================
+﻿# ============================================================
+
+# Worklog ICS -> Outlook Calendar
+
+# FileSystemWatcher / Safe STA Main Loop
+
+# ============================================================
+
 $ErrorActionPreference = "Stop"
+
 [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
 $OutputEncoding = [System.Text.Encoding]::UTF8
 
-============================================================
-CONFIGURATION
-============================================================
+# ============================================================
+
+# CONFIGURATION
+
+# ============================================================
+
 $BaseOneDrive = Get-ChildItem "$env:USERPROFILE\OneDrive*" |
-    Where-Object { $_.Name -like "エイラシステム" } |
-    Select-Object -ExpandProperty FullName
+Where-Object { $_.Name -like "*エイラシステム*" } |
+Select-Object -ExpandProperty FullName
 
 if (-not $BaseOneDrive) {
-    $BaseOneDrive = "$env:USERPROFILE\OneDrive - エイラシステム株式会社"
+$BaseOneDrive = "$env:USERPROFILE\OneDrive - エイラシステム株式会社"
 }
 
 $LocalFolder = Join-Path $BaseOneDrive "ics"
@@ -22,552 +30,660 @@ $Filter = "time.ics"
 $TargetIcsFile = Join-Path $LocalFolder $Filter
 
 if (-not (Test-Path $LocalFolder)) {
-    New-Item -ItemType Directory -Path $LocalFolder -Force | Out-Null
+New-Item -ItemType Directory -Path $LocalFolder -Force | Out-Null
 }
 
 $script:StartedOutlookByScript = $false
 $script:ProcessTriggered = $false
 
-============================================================
-SAFE COM RELEASE HELPER
-============================================================
+# ============================================================
+
+# SAFE COM RELEASE HELPER
+
+# ============================================================
+
 function Release-ComObject {
-    param($ComObject)
-    
-    if ($null -ne $ComObject) {
-        try {
-            if ([System.Runtime.InteropServices.Marshal]::IsComObject($ComObject)) {
-                [System.Runtime.InteropServices.Marshal]::ReleaseComObject($ComObject) | Out-Null
-            }
+param($ComObject)
+
+```
+if ($null -ne $ComObject) {
+    try {
+        if ([System.Runtime.InteropServices.Marshal]::IsComObject($ComObject)) {
+            [System.Runtime.InteropServices.Marshal]::ReleaseComObject($ComObject) | Out-Null
         }
-        catch {}
     }
+    catch {}
+}
+```
+
 }
 
-============================================================
-CONNECT TO OUTLOOK
-============================================================
-function Connect-Outlook {
-    Write-Host "Connecting to Outlook via COM..."
-    $outlook = $null
-    $maxAttempts = 10
+# ============================================================
 
-    for ($attempt = 1; $attempt -le $maxAttempts; $attempt++) {
+# CONNECT TO OUTLOOK
+
+# ============================================================
+
+function Connect-Outlook {
+Write-Host "Connecting to Outlook via COM..."
+
+```
+$outlook = $null
+$maxAttempts = 10
+
+for ($attempt = 1; $attempt -le $maxAttempts; $attempt++) {
+    try {
+        $outlook = $null
+
         try {
-            $outlook = $null
+            $outlook = [System.Runtime.InteropServices.Marshal]::GetActiveObject("Outlook.Application")
+        }
+        catch {
+            $outlook = New-Object -ComObject Outlook.Application
+
+            if ($null -eq (Get-Process -Name "OUTLOOK" -ErrorAction SilentlyContinue)) {
+                $script:StartedOutlookByScript = $true
+            }
+        }
+
+        if ($null -ne $outlook) {
+            $ns = $null
 
             try {
-                $outlook = [System.Runtime.InteropServices.Marshal]::GetActiveObject("Outlook.Application")
-            }
-            catch {
-                $outlook = New-Object -ComObject Outlook.Application
+                $ns = $outlook.GetNamespace("MAPI")
 
-                if ($null -eq (Get-Process -Name "OUTLOOK" -ErrorAction SilentlyContinue)) {
-                    $script:StartedOutlookByScript = $true
+                if ($null -ne $ns) {
+                    Write-Host "[OK] Connected to Outlook successfully."
+                    return $outlook
                 }
             }
-
-            if ($null -ne $outlook) {
-                $ns = $null
-
-                try {
-                    $ns = $outlook.GetNamespace("MAPI")
-
-                    if ($null -ne $ns) {
-                        Write-Host "[OK] Connected to Outlook successfully."
-                        return $outlook
-                    }
-                }
-                finally {
-                    Release-ComObject $ns
-                }
+            finally {
+                Release-ComObject $ns
             }
-        }
-        catch {
-            Write-Host "Attempt $attempt of $maxAttempts failed to bind Outlook COM: $_"
-        }
-
-        if ($attempt -lt $maxAttempts) {
-            Start-Sleep -Seconds 3
         }
     }
+    catch {
+        Write-Host "Attempt $attempt of $maxAttempts failed to bind Outlook COM: $_"
+    }
 
-    throw "Failed to initialize Outlook COM interface after $maxAttempts attempts."
+    if ($attempt -lt $maxAttempts) {
+        Start-Sleep -Seconds 3
+    }
 }
 
-============================================================
-ICS TEXT UNESCAPING
-============================================================
+throw "Failed to initialize Outlook COM interface after $maxAttempts attempts."
+```
+
+}
+
+# ============================================================
+
+# ICS TEXT UNESCAPING
+
+# ============================================================
+
 function Unescape-IcsText {
-    param([string]$Text)
+param([string]$Text)
 
-    if ($null -eq $Text) {
-        return ""
-    }
-
-    $Text = $Text -replace '\\n', "`r`n"
-    $Text = $Text -replace '\\N', "`r`n"
-    $Text = $Text -replace '\\,', ","
-    $Text = $Text -replace '\\;', ";"
-    $Text = $Text -replace '\\\\', "\"
-
-    return $Text
+```
+if ($null -eq $Text) {
+    return ""
 }
 
-============================================================
-ICS DATE PARSER
-============================================================
+$Text = $Text -replace '\\n', "`r`n"
+$Text = $Text -replace '\\N', "`r`n"
+$Text = $Text -replace '\\,', ","
+$Text = $Text -replace '\\;', ";"
+$Text = $Text -replace '\\\\', "\"
+
+return $Text
+```
+
+}
+
+# ============================================================
+
+# ICS DATE PARSER
+
+# ============================================================
+
 function Parse-IcsDate {
-    param([string]$Value)
+param([string]$Value)
 
-    if ([string]::IsNullOrWhiteSpace($Value)) {
-        throw "ICS date value is empty."
-    }
-
-    if ($Value -match '^(\d{4})(\d{2})(\d{2})$') {
-        return [datetime]::ParseExact(
-            $Value,
-            "yyyyMMdd",
-            [System.Globalization.CultureInfo]::InvariantCulture
-        )
-    }
-
-    if ($Value -match '^(\d{4})(\d{2})(\d{2})T(\d{2})(\d{2})(\d{2})Z$') {
-        $dt = [datetime]::ParseExact(
-            $Value,
-            "yyyyMMddTHHmmssZ",
-            [System.Globalization.CultureInfo]::InvariantCulture,
-            [System.Globalization.DateTimeStyles]::AssumeUniversal
-        )
-
-        return $dt.ToLocalTime()
-    }
-
-    if ($Value -match '^(\d{4})(\d{2})(\d{2})T(\d{2})(\d{2})(\d{2})$') {
-        return [datetime]::ParseExact(
-            $Value,
-            "yyyyMMddTHHmmss",
-            [System.Globalization.CultureInfo]::InvariantCulture
-        )
-    }
-
-    throw "Unsupported ICS date format: $Value"
+```
+if ([string]::IsNullOrWhiteSpace($Value)) {
+    throw "ICS date value is empty."
 }
 
-============================================================
-READ ICS EVENTS
-============================================================
-function Read-IcsEvents {
-    param([string]$Path)
-
-    $bytes = [System.IO.File]::ReadAllBytes($Path)
-    $raw = ""
-
-    if (
-        $bytes.Length -ge 3 -and
-        $bytes[0] -eq 0xEF -and
-        $bytes[1] -eq 0xBB -and
-        $bytes[2] -eq 0xBF
-    ) {
-        $raw = [System.Text.Encoding]::UTF8.GetString(
-            $bytes,
-            3,
-            $bytes.Length - 3
-        )
-    }
-    else {
-        try {
-            $raw = [System.Text.Encoding]::UTF8.GetString($bytes)
-        }
-        catch {
-            $raw = [System.IO.File]::ReadAllText(
-                $Path,
-                [System.Text.Encoding]::Default
-            )
-        }
-    }
-
-    $raw = $raw -replace "`r`n", "`n"
-    $raw = $raw -replace "`r", "`n"
-
-    # ICS line unfolding
-    $raw = $raw -replace "`n[ `t]", ""
-
-    $lines = $raw -split "`n"
-    $events = @()
-    $current = $null
-
-    foreach ($line in $lines) {
-        $line = $line.TrimEnd()
-
-        if ($line -eq "BEGIN:VEVENT") {
-            $current = @{
-                Properties = @{}
-            }
-            continue
-        }
-
-        if ($line -eq "END:VEVENT") {
-            if ($null -ne $current) {
-                $events += $current
-            }
-
-            $current = $null
-            continue
-        }
-
-        if ($null -eq $current) {
-            continue
-        }
-
-        $parts = $line -split ":", 2
-
-        if ($parts.Count -ne 2) {
-            continue
-        }
-
-        $propertyName = ($parts[0] -split ";")[0].ToUpper()
-        $current.Properties[$propertyName] = $parts[1]
-    }
-
-    return @($events)
+if ($Value -match '^(\d{4})(\d{2})(\d{2})$') {
+    return [datetime]::ParseExact(
+        $Value,
+        "yyyyMMdd",
+        [System.Globalization.CultureInfo]::InvariantCulture
+    )
 }
 
-============================================================
-FIND EXISTING WORKLOG EVENT
-============================================================
-function Find-ExistingWorklogEvent {
-    param(
-        $Calendar,
-        [string]$UID,
-        [string]$Summary,
-        [datetime]$Start
+if ($Value -match '^(\d{4})(\d{2})(\d{2})T(\d{2})(\d{2})(\d{2})Z$') {
+    $dt = [datetime]::ParseExact(
+        $Value,
+        "yyyyMMddTHHmmssZ",
+        [System.Globalization.CultureInfo]::InvariantCulture,
+        [System.Globalization.DateTimeStyles]::AssumeUniversal
     )
 
-    $items = $null
+    return $dt.ToLocalTime()
+}
 
+if ($Value -match '^(\d{4})(\d{2})(\d{2})T(\d{2})(\d{2})(\d{2})$') {
+    return [datetime]::ParseExact(
+        $Value,
+        "yyyyMMddTHHmmss",
+        [System.Globalization.CultureInfo]::InvariantCulture
+    )
+}
+
+throw "Unsupported ICS date format: $Value"
+```
+
+}
+
+# ============================================================
+
+# READ ICS EVENTS
+
+# ============================================================
+
+function Read-IcsEvents {
+param([string]$Path)
+
+```
+$bytes = [System.IO.File]::ReadAllBytes($Path)
+$raw = ""
+
+if (
+    $bytes.Length -ge 3 -and
+    $bytes[0] -eq 0xEF -and
+    $bytes[1] -eq 0xBB -and
+    $bytes[2] -eq 0xBF
+) {
+    $raw = [System.Text.Encoding]::UTF8.GetString(
+        $bytes,
+        3,
+        $bytes.Length - 3
+    )
+}
+else {
     try {
-        $items = $Calendar.Items
-        $count = $items.Count
+        $raw = [System.Text.Encoding]::UTF8.GetString($bytes)
+    }
+    catch {
+        $raw = [System.IO.File]::ReadAllText(
+            $Path,
+            [System.Text.Encoding]::Default
+        )
+    }
+}
 
-        for ($index = 1; $index -le $count; $index++) {
-            $item = $null
+$raw = $raw -replace "`r`n", "`n"
+$raw = $raw -replace "`r", "`n"
+
+# ICS line unfolding
+$raw = $raw -replace "`n[ `t]", ""
+
+$lines = $raw -split "`n"
+
+$events = @()
+$current = $null
+
+foreach ($line in $lines) {
+    $line = $line.TrimEnd()
+
+    if ($line -eq "BEGIN:VEVENT") {
+        $current = @{
+            Properties = @{}
+        }
+        continue
+    }
+
+    if ($line -eq "END:VEVENT") {
+        if ($null -ne $current) {
+            $events += $current
+        }
+
+        $current = $null
+        continue
+    }
+
+    if ($null -eq $current) {
+        continue
+    }
+
+    $parts = $line -split ":", 2
+
+    if ($parts.Count -ne 2) {
+        continue
+    }
+
+    $propertyName = ($parts[0] -split ";")[0].ToUpper()
+
+    $current.Properties[$propertyName] = $parts[1]
+}
+
+return @($events)
+```
+
+}
+
+# ============================================================
+
+# FIND EXISTING WORKLOG EVENT
+
+# ============================================================
+
+function Find-ExistingWorklogEvent {
+param(
+$Calendar,
+[string]$UID,
+[string]$Summary,
+[datetime]$Start
+)
+
+```
+$items = $null
+
+try {
+    $items = $Calendar.Items
+    $count = $items.Count
+
+    for ($index = 1; $index -le $count; $index++) {
+
+        $item = $null
+
+        try {
+            $item = $items.Item($index)
+
+            if ($null -eq $item) {
+                continue
+            }
+
+            if ($item.Class -ne 26) {
+                Release-ComObject $item
+                continue
+            }
+
+            $property = $null
 
             try {
-                $item = $items.Item($index)
+                $property = $item.UserProperties.Find("WorklogUID")
 
-                if ($null -eq $item) {
-                    continue
+                if (
+                    $null -ne $property -and
+                    $property.Value -eq $UID
+                ) {
+                    return $item
                 }
-
-                if ($item.Class -ne 26) {
-                    Release-ComObject $item
-                    continue
-                }
-
-                $property = $null
-
-                try {
-                    $property = $item.UserProperties.Find("WorklogUID")
-
-                    if (
-                        $null -ne $property -and
-                        $property.Value -eq $UID
-                    ) {
-                        return $item
-                    }
-                }
-                finally {
-                    Release-ComObject $property
-                }
-
-                if ($item.Subject -eq $Summary) {
-                    $itemStart = [datetime]$item.Start
-
-                    if ($itemStart.Date -eq $Start.Date) {
-                        return $item
-                    }
-                }
-
-                Release-ComObject $item
             }
-            catch {
-                Release-ComObject $item
+            finally {
+                Release-ComObject $property
+            }
+
+            if ($item.Subject -eq $Summary) {
+
+                $itemStart = [datetime]$item.Start
+
+                if ($itemStart.Date -eq $Start.Date) {
+                    return $item
+                }
+            }
+
+            Release-ComObject $item
+        }
+        catch {
+            Release-ComObject $item
+        }
+    }
+}
+finally {
+    Release-ComObject $items
+}
+
+return $null
+```
+
+}
+
+# ============================================================
+
+# PROCESS LOCAL ICS FILE
+
+# ============================================================
+
+function Invoke-ProcessIcs {
+param([string]$FilePath)
+
+```
+if (-not (Test-Path $FilePath)) {
+    return
+}
+
+$outlook = $null
+$namespace = $null
+$calendar = $null
+
+$createdCount = 0
+$updatedCount = 0
+$skippedCount = 0
+
+try {
+
+    Write-Output ""
+    Write-Output "[DETECTED] Processing local ICS file..."
+
+    # Give OneDrive a moment to finish the sync operation
+    Start-Sleep -Seconds 2
+
+    # Verify that the file can be opened exclusively
+    $fileReady = $false
+
+    for ($attempt = 1; $attempt -le 10; $attempt++) {
+        try {
+
+            if (-not (Test-Path $FilePath)) {
+                return
+            }
+
+            $stream = [System.IO.File]::Open(
+                $FilePath,
+                'Open',
+                'Read',
+                'None'
+            )
+
+            $stream.Close()
+            $stream.Dispose()
+
+            $fileReady = $true
+            break
+        }
+        catch {
+
+            if ($attempt -lt 10) {
+                Start-Sleep -Seconds 1
             }
         }
     }
-    finally {
-        Release-ComObject $items
-    }
 
-    return $null
-}
-
-============================================================
-PROCESS LOCAL ICS FILE
-============================================================
-function Invoke-ProcessIcs {
-    param([string]$FilePath)
-
-    if (-not (Test-Path $FilePath)) {
+    if (-not $fileReady) {
+        Write-Output "[WAIT] ICS file is still being written/locked."
         return
     }
 
-    $outlook = $null
-    $namespace = $null
-    $calendar = $null
+    $outlook = Connect-Outlook
 
-    $createdCount = 0
-    $updatedCount = 0
-    $skippedCount = 0
+    $namespace = $outlook.GetNamespace("MAPI")
+    $calendar = $namespace.GetDefaultFolder(9)
 
-    try {
-        Write-Output ""
-        Write-Output "[DETECTED] Processing local ICS file..."
+    $events = Read-IcsEvents -Path $FilePath
 
-        # Give OneDrive a moment to finish the sync operation
-        Start-Sleep -Seconds 2
+    Write-Output "Processing ICS events..."
 
-        # Verify that the file can be opened exclusively
-        $fileReady = $false
+    foreach ($icsEvent in $events) {
 
-        for ($attempt = 1; $attempt -le 10; $attempt++) {
-            try {
-                if (-not (Test-Path $FilePath)) {
-                    return
-                }
+        $properties = $icsEvent.Properties
 
-                $stream = [System.IO.File]::Open(
-                    $FilePath,
-                    'Open',
-                    'Read',
-                    'None'
-                )
+        $uid = $properties["UID"]
 
-                $stream.Close()
-                $stream.Dispose()
-
-                $fileReady = $true
-                break
-            }
-            catch {
-                if ($attempt -lt 10) {
-                    Start-Sleep -Seconds 1
-                }
-            }
+        if ([string]::IsNullOrWhiteSpace($uid)) {
+            $skippedCount++
+            continue
         }
 
-        if (-not $fileReady) {
-            Write-Output "[WAIT] ICS file is still being written/locked."
-            return
+        $summary = Unescape-IcsText $properties["SUMMARY"]
+        $description = Unescape-IcsText $properties["DESCRIPTION"]
+        $location = Unescape-IcsText $properties["LOCATION"]
+        $transp = $properties["TRANSP"]
+
+        $targetBusyStatus = 2
+
+        if ($summary -eq "Out of Office") {
+            $targetBusyStatus = 3
+        }
+        elseif ($transp -eq "TRANSPARENT") {
+            $targetBusyStatus = 0
         }
 
-        $outlook = Connect-Outlook
-        $namespace = $outlook.GetNamespace("MAPI")
-        $calendar = $namespace.GetDefaultFolder(9)
+        try {
 
-        $events = Read-IcsEvents -Path $FilePath
+            $start = Parse-IcsDate $properties["DTSTART"]
+            $end = Parse-IcsDate $properties["DTEND"]
 
-        Write-Output "Processing ICS events..."
+        }
+        catch {
 
-        foreach ($icsEvent in $events) {
-            $properties = $icsEvent.Properties
-            $uid = $properties["UID"]
+            Write-Output "  [SKIP] Invalid date format for event: $summary"
 
-            if ([string]::IsNullOrWhiteSpace($uid)) {
-                $skippedCount++
-                continue
-            }
+            $skippedCount++
+            continue
+        }
 
-            $summary = Unescape-IcsText $properties["SUMMARY"]
-            $description = Unescape-IcsText $properties["DESCRIPTION"]
-            $location = Unescape-IcsText $properties["LOCATION"]
-            $transp = $properties["TRANSP"]
+        Write-Output "  -> Processing: '$summary' ($($start.ToString('yyyy-MM-dd')))..."
 
-            $targetBusyStatus = 2
 
-            if ($summary -eq "Out of Office") {
-                $targetBusyStatus = 3
-            }
-            elseif ($transp -eq "TRANSPARENT") {
-                $targetBusyStatus = 0
-            }
+        $existing = Find-ExistingWorklogEvent `
+            -Calendar $calendar `
+            -UID $uid `
+            -Summary $summary `
+            -Start $start
 
-            try {
-                $start = Parse-IcsDate $properties["DTSTART"]
-                $end = Parse-IcsDate $properties["DTEND"]
-            }
-            catch {
-                Write-Output "  [SKIP] Invalid date format for event: $summary"
-                $skippedCount++
-                continue
-            }
 
-            Write-Output "  -> Processing: '$summary' ($($start.ToString('yyyy-MM-dd')))..."
+        # ====================================================
+        # CREATE NEW EVENT
+        # ====================================================
 
-            $existing = Find-ExistingWorklogEvent `
-                -Calendar $calendar `
-                -UID $uid `
-                -Summary $summary `
-                -Start $start
+        if ($null -eq $existing) {
 
-            # ====================================================
-            # CREATE NEW EVENT
-            # ====================================================
-            if ($null -eq $existing) {
-                $appointment = $calendar.Items.Add(1)
+            $appointment = $calendar.Items.Add(1)
 
-                $appointment.Subject = $summary
-                $appointment.Start = $start
-                $appointment.End = $end
-                $appointment.AllDayEvent = $true
-                $appointment.Body = $description
-                $appointment.Location = $location
-                $appointment.BusyStatus = $targetBusyStatus
+            $appointment.Subject = $summary
+            $appointment.Start = $start
+            $appointment.End = $end
+            $appointment.AllDayEvent = $true
+            $appointment.Body = $description
+            $appointment.Location = $location
+            $appointment.BusyStatus = $targetBusyStatus
 
-                $uidProperty = $appointment.UserProperties.Add(
-                    "WorklogUID",
-                    1,
-                    $false
-                )
+            $uidProperty = $appointment.UserProperties.Add(
+                "WorklogUID",
+                1,
+                $false
+            )
 
-                $uidProperty.Value = $uid
-                $appointment.Save()
+            $uidProperty.Value = $uid
 
-                Release-ComObject $uidProperty
-                Release-ComObject $appointment
+            $appointment.Save()
 
-                Write-Output "  [CREATED]"
-                $createdCount++
-            }
-            # ====================================================
-            # UPDATE EXISTING EVENT
-            # ====================================================
-            else {
-                $normExistingBody = if ($null -eq $existing.Body) { "" } else { "$($existing.Body)".Replace("`r`n", "`n").Trim() }
-                $normNewBody = if ($null -eq $description) { "" } else { "$description".Replace("`r`n", "`n").Trim() }
+            Release-ComObject $uidProperty
+            Release-ComObject $appointment
 
-                $normExistingLoc = if ($null -eq $existing.Location) { "" } else { "$($existing.Location)".Trim() }
-                $normNewLoc = if ($null -eq $location) { "" } else { "$location".Trim() }
+            Write-Output "  [CREATED]"
 
-                $existingStart = [datetime]$existing.Start
-                $existingEnd = [datetime]$existing.End
+            $createdCount++
+        }
 
-                $changeReasons = @()
+        # ====================================================
+        # UPDATE EXISTING EVENT
+        # ====================================================
 
-                if ($existing.Subject -ne $summary) {
-                    $changeReasons += "Subject"
-                }
+        else {
 
-                if ($existingStart.Date -ne $start.Date) {
-                    $changeReasons += "Start Date"
-                }
-
-                if ($existingEnd.Date -ne $end.Date) {
-                    $changeReasons += "End Date"
-                }
-
-                if ($normExistingBody -ne $normNewBody) {
-                    $changeReasons += "Body"
-                }
-
-                if ($normExistingLoc -ne $normNewLoc) {
-                    $changeReasons += "Location"
-                }
-
-                if ($existing.BusyStatus -ne $targetBusyStatus) {
-                    $changeReasons += "BusyStatus"
-                }
-
-                $hasChanges = ($changeReasons.Count -gt 0)
-
-                if ($hasChanges) {
-                    $existing.Subject = $summary
-                    $existing.Start = $start
-                    $existing.End = $end
-                    $existing.AllDayEvent = $true
-                    $existing.Body = $description
-                    $existing.Location = $location
-                    $existing.BusyStatus = $targetBusyStatus
-
-                    $uidProperty = $existing.UserProperties.Find("WorklogUID")
-
-                    if ($null -eq $uidProperty) {
-                        $uidProperty = $existing.UserProperties.Add(
-                            "WorklogUID",
-                            1,
-                            $false
-                        )
-                    }
-
-                    $uidProperty.Value = $uid
-                    $existing.Save()
-
-                    Release-ComObject $uidProperty
-                    Release-ComObject $existing
-
-                    Write-Output "  [UPDATED: $($changeReasons -join ', ')]"
-                    $updatedCount++
+            $normExistingBody =
+                if ($null -eq $existing.Body) {
+                    ""
                 }
                 else {
-                    Release-ComObject $existing
-
-                    Write-Output "  [SKIPPED - No Changes]"
-                    $skippedCount++
+                    "$($existing.Body)".Replace("`r`n", "`n").Trim()
                 }
+
+            $normNewBody =
+                if ($null -eq $description) {
+                    ""
+                }
+                else {
+                    "$description".Replace("`r`n", "`n").Trim()
+                }
+
+            $normExistingLoc =
+                if ($null -eq $existing.Location) {
+                    ""
+                }
+                else {
+                    "$($existing.Location)".Trim()
+                }
+
+            $normNewLoc =
+                if ($null -eq $location) {
+                    ""
+                }
+                else {
+                    "$location".Trim()
+                }
+
+            $existingStart = [datetime]$existing.Start
+            $existingEnd = [datetime]$existing.End
+
+            $changeReasons = @()
+
+            if ($existing.Subject -ne $summary) {
+                $changeReasons += "Subject"
+            }
+
+            if ($existingStart.Date -ne $start.Date) {
+                $changeReasons += "Start Date"
+            }
+
+            if ($existingEnd.Date -ne $end.Date) {
+                $changeReasons += "End Date"
+            }
+
+            if ($normExistingBody -ne $normNewBody) {
+                $changeReasons += "Body"
+            }
+
+            if ($normExistingLoc -ne $normNewLoc) {
+                $changeReasons += "Location"
+            }
+
+            if ($existing.BusyStatus -ne $targetBusyStatus) {
+                $changeReasons += "BusyStatus"
+            }
+
+            $hasChanges = ($changeReasons.Count -gt 0)
+
+            if ($hasChanges) {
+
+                $existing.Subject = $summary
+                $existing.Start = $start
+                $existing.End = $end
+                $existing.AllDayEvent = $true
+                $existing.Body = $description
+                $existing.Location = $location
+                $existing.BusyStatus = $targetBusyStatus
+
+                $uidProperty = $existing.UserProperties.Find("WorklogUID")
+
+                if ($null -eq $uidProperty) {
+                    $uidProperty = $existing.UserProperties.Add(
+                        "WorklogUID",
+                        1,
+                        $false
+                    )
+                }
+
+                $uidProperty.Value = $uid
+
+                $existing.Save()
+
+                Release-ComObject $uidProperty
+                Release-ComObject $existing
+
+                Write-Output "  [UPDATED: $($changeReasons -join ', ')]"
+
+                $updatedCount++
+            }
+            else {
+
+                Release-ComObject $existing
+
+                Write-Output "  [SKIPPED - No Changes]"
+
+                $skippedCount++
             }
         }
-
-        # ========================================================
-        # DELETE PROCESSED FILE
-        # ========================================================
-        Remove-Item $FilePath -Force -ErrorAction SilentlyContinue
-        Write-Output "[OK] Local ICS file processed and cleaned up."
     }
-    catch {
-        Write-Output ""
-        Write-Output "========================================"
-        Write-Output "ERROR ENCOUNTERED:"
-        Write-Output $_
-        Write-Output "========================================"
+
+    # ========================================================
+    # DELETE PROCESSED FILE
+    # ========================================================
+
+    Remove-Item $FilePath -Force -ErrorAction SilentlyContinue
+
+    Write-Output "[OK] Local ICS file processed and cleaned up."
+}
+catch {
+
+    Write-Output ""
+    Write-Output "========================================"
+    Write-Output "ERROR ENCOUNTERED:"
+    Write-Output $_
+    Write-Output "========================================"
+}
+finally {
+
+    Release-ComObject $calendar
+    Release-ComObject $namespace
+    Release-ComObject $outlook
+
+    [GC]::Collect()
+    [GC]::WaitForPendingFinalizers()
+
+    if ($script:StartedOutlookByScript) {
+        Stop-Process -Name OUTLOOK -Force -ErrorAction SilentlyContinue
+        $script:StartedOutlookByScript = $false
     }
-    finally {
-        Release-ComObject $calendar
-        Release-ComObject $namespace
-        Release-ComObject $outlook
 
-        [GC]::Collect()
-        [GC]::WaitForPendingFinalizers()
+    Write-Output ""
+    Write-Output "========================================"
+    Write-Output "FINISHED. Created: $createdCount | Updated: $updatedCount | Skipped: $skippedCount"
+    Write-Output "========================================"
+}
+```
 
-        if ($script:StartedOutlookByScript) {
-            Stop-Process -Name OUTLOOK -Force -ErrorAction SilentlyContinue
-            $script:StartedOutlookByScript = $false
-        }
-
-        Write-Output ""
-        Write-Output "========================================"
-        Write-Output "FINISHED. Created: $createdCount | Updated: $updatedCount | Skipped: $skippedCount"
-        Write-Output "========================================"
-    }
 }
 
-============================================================
-FILE SYSTEM WATCHER
-============================================================
+# ============================================================
+
+# FILE SYSTEM WATCHER
+
+# ============================================================
+
 $watcher = New-Object System.IO.FileSystemWatcher
+
 $watcher.Path = $LocalFolder
 $watcher.Filter = $Filter
 $watcher.IncludeSubdirectories = $false
 
 # Watch the types of changes OneDrive is likely to generate
+
 $watcher.NotifyFilter = (
-    [System.IO.NotifyFilters]::FileName -bor
-    [System.IO.NotifyFilters]::LastWrite -bor
-    [System.IO.NotifyFilters]::Size
+[System.IO.NotifyFilters]::FileName -bor
+[System.IO.NotifyFilters]::LastWrite -bor
+[System.IO.NotifyFilters]::Size
 )
 
 # Increase internal event buffer
+
 $watcher.InternalBufferSize = 65536
+
 $watcher.EnableRaisingEvents = $true
 
 Write-Output ""
@@ -578,64 +694,108 @@ Write-Output "Watching File: $Filter"
 Write-Output "========================================"
 Write-Output "Keep this window minimized to run in background."
 
-============================================================
-EVENT ACTION
-============================================================
+# ============================================================
+
+# EVENT ACTION
+
+# ============================================================
+
 $action = {
-    $path = $Event.SourceEventArgs.FullPath
 
-    if ($path -ieq $TargetIcsFile) {
-        Write-Host "[EVENT] ICS file change detected: $path"
+```
+$path = $Event.SourceEventArgs.FullPath
 
-        # Only set a flag.
-        # Actual Outlook COM processing stays on the main STA thread.
-        $script:ProcessTriggered = $true
-    }
+if ($path -ieq $TargetIcsFile) {
+
+    Write-Host "[EVENT] ICS file change detected: $path"
+
+    # Only set a flag.
+    # Actual Outlook COM processing stays on the main STA thread.
+    $script:ProcessTriggered = $true
+}
+```
+
 }
 
-============================================================
-REGISTER EVENTS
-============================================================
-Register-ObjectEvent -InputObject $watcher -EventName Created -Action $action -SourceIdentifier "WorklogICS.Created" | Out-Null
-Register-ObjectEvent -InputObject $watcher -EventName Changed -Action $action -SourceIdentifier "WorklogICS.Changed" | Out-Null
-Register-ObjectEvent -InputObject $watcher -EventName Renamed -Action $action -SourceIdentifier "WorklogICS.Renamed" | Out-Null
+# ============================================================
 
-============================================================
-PROCESS EXISTING FILE ON STARTUP
-============================================================
+# REGISTER EVENTS
+
+# ============================================================
+
+Register-ObjectEvent `    -InputObject $watcher`
+-EventName Created `    -Action $action`
+-SourceIdentifier "WorklogICS.Created" |
+Out-Null
+
+Register-ObjectEvent `    -InputObject $watcher`
+-EventName Changed `    -Action $action`
+-SourceIdentifier "WorklogICS.Changed" |
+Out-Null
+
+Register-ObjectEvent `    -InputObject $watcher`
+-EventName Renamed `    -Action $action`
+-SourceIdentifier "WorklogICS.Renamed" |
+Out-Null
+
+# ============================================================
+
+# PROCESS EXISTING FILE ON STARTUP
+
+# ============================================================
+
 if (Test-Path $TargetIcsFile) {
-    Write-Output "[INFO] Existing file detected on startup. Processing..."
-    Invoke-ProcessIcs -FilePath $TargetIcsFile
+
+```
+Write-Output "[INFO] Existing file detected on startup. Processing..."
+
+Invoke-ProcessIcs -FilePath $TargetIcsFile
+```
+
 }
 
-============================================================
-MAIN STA LOOP
-============================================================
+# ============================================================
+
+# MAIN STA LOOP
+
+# ============================================================
+
 try {
-    while ($true) {
-        if ($script:ProcessTriggered) {
-            $script:ProcessTriggered = $false
 
-            if (Test-Path $TargetIcsFile) {
-                Invoke-ProcessIcs -FilePath $TargetIcsFile
-            }
+```
+while ($true) {
+
+    if ($script:ProcessTriggered) {
+
+        $script:ProcessTriggered = $false
+
+        if (Test-Path $TargetIcsFile) {
+
+            Invoke-ProcessIcs -FilePath $TargetIcsFile
         }
-
-        # This is NOT polling for the file.
-        # It simply keeps the STA thread alive and allows
-        # PowerShell's FileSystemWatcher events to be processed.
-        Start-Sleep -Milliseconds 500
     }
+
+    # This is NOT polling for the file.
+    # It simply keeps the STA thread alive and allows
+    # PowerShell's FileSystemWatcher events to be processed.
+    Start-Sleep -Milliseconds 500
+}
+```
+
 }
 finally {
-    Unregister-Event -SourceIdentifier "WorklogICS.Created" -ErrorAction SilentlyContinue
-    Unregister-Event -SourceIdentifier "WorklogICS.Changed" -ErrorAction SilentlyContinue
-    Unregister-Event -SourceIdentifier "WorklogICS.Renamed" -ErrorAction SilentlyContinue
 
-    Get-Job |
-        Where-Object { $_.Name -like "WorklogICS*" } |
-        Remove-Job -Force -ErrorAction SilentlyContinue
+```
+Unregister-Event -SourceIdentifier "WorklogICS.Created" -ErrorAction SilentlyContinue
+Unregister-Event -SourceIdentifier "WorklogICS.Changed" -ErrorAction SilentlyContinue
+Unregister-Event -SourceIdentifier "WorklogICS.Renamed" -ErrorAction SilentlyContinue
 
-    $watcher.EnableRaisingEvents = $false
-    $watcher.Dispose()
+Get-Job |
+    Where-Object { $_.Name -like "WorklogICS*" } |
+    Remove-Job -Force -ErrorAction SilentlyContinue
+
+$watcher.EnableRaisingEvents = $false
+$watcher.Dispose()
+```
+
 }
