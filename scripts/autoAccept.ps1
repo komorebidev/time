@@ -1,10 +1,16 @@
+# ============================================================
+# Worklog ICS -> Outlook Calendar (Local OneDrive Watcher / Pure COM)
+# ============================================================
+
 $ErrorActionPreference = "Stop"
 
 # ============================================================
 # CONFIGURATION
 # ============================================================
+
 $LocalFolder = "$env:USERPROFILE\OneDrive - エイラシステム株式会社\ics"
 $Filter = "time.ics"
+$TargetIcsFile = Join-Path $LocalFolder $Filter
 
 if (-not (Test-Path $LocalFolder)) {
     New-Item -ItemType Directory -Path $LocalFolder -Force | Out-Null
@@ -13,27 +19,35 @@ if (-not (Test-Path $LocalFolder)) {
 $script:StartedOutlookByScript = $false
 
 # ============================================================
-# OUTLOOK COM & ICS FUNCTIONS
+# CONNECT TO OUTLOOK (PURE COM BACKGROUND INSTANTIATION)
 # ============================================================
 
 function Connect-Outlook {
+    Write-Host ""
+    Write-Host "Connecting to Outlook via background COM..."
+
     $outlook = $null
     $maxAttempts = 10
 
     for ($attempt = 1; $attempt -le $maxAttempts; $attempt++) {
         try {
             $outlook = [Runtime.InteropServices.Marshal]::GetActiveObject("Outlook.Application") -as [Microsoft.Office.Interop.Outlook.Application]
-            if ($null -ne $outlook) { break }
-            throw "No active instance found."
+            if ($null -eq $outlook) {
+                throw "No active instance found."
+            }
+            Write-Host "[OK] Connected to active Outlook instance"
+            break
         }
         catch {
             try {
                 $outlookType = [Type]::GetTypeFromProgID("Outlook.Application")
                 $outlook = [Activator]::CreateInstance($outlookType)
                 $script:StartedOutlookByScript = $true
+                Write-Host "[OK] Created background Outlook COM instance"
                 break
             }
             catch {
+                Write-Host "Attempt $attempt of $maxAttempts failed to bind Outlook COM. Retrying..."
                 if ($attempt -eq $maxAttempts) {
                     throw "Failed to initialize Outlook COM interface: $_"
                 }
@@ -41,35 +55,52 @@ function Connect-Outlook {
             }
         }
     }
+
     return $outlook
 }
+
+# ============================================================
+# ICS TEXT UNESCAPING
+# ============================================================
 
 function Unescape-IcsText {
     param([string]$Text)
     if ($null -eq $Text) { return "" }
-    $Text = $Text -replace '\\n', "`r`n" -replace '\\N', "`r`n" -replace '\\,', "," -replace '\\;', ";" -replace '\\\\', "\"
+    $Text = $Text -replace '\\n', "`r`n"
+    $Text = $Text -replace '\\N', "`r`n"
+    $Text = $Text -replace '\\,', ","
+    $Text = $Text -replace '\\;', ";"
+    $Text = $Text -replace '\\\\', "\"
     return $Text
 }
+
+# ============================================================
+# ICS DATE PARSER
+# ============================================================
 
 function Parse-IcsDate {
     param([string]$Value)
     if ([string]::IsNullOrWhiteSpace($Value)) { throw "ICS date value is empty." }
 
     if ($Value -match '^(\d{4})(\d{2})(\d{2})$') {
-        return [datetime]::ParseExact($Value, "yyyyMMdd", [Globalization.CultureInfo]::InvariantCulture)
+        return [datetime]::ParseExact($Value, "yyyyMMdd", [System.Globalization.CultureInfo]::InvariantCulture)
     }
     if ($Value -match '^(\d{4})(\d{2})(\d{2})T(\d{2})(\d{2})(\d{2})Z$') {
-        return ([datetime]::ParseExact($Value, "yyyyMMddTHHmmssZ", [Globalization.CultureInfo]::InvariantCulture, [Globalization.DateTimeStyles]::AssumeUniversal)).ToLocalTime()
+        $dt = [datetime]::ParseExact($Value, "yyyyMMddTHHmmssZ", [System.Globalization.CultureInfo]::InvariantCulture, [System.Globalization.DateTimeStyles]::AssumeUniversal)
+        return $dt.ToLocalTime()
     }
     if ($Value -match '^(\d{4})(\d{2})(\d{2})T(\d{2})(\d{2})(\d{2})$') {
-        return ([datetime]::ParseExact($Value, "yyyyMMddTHHmmss", [Globalization.CultureInfo]::InvariantCulture)
+        return [datetime]::ParseExact($Value, "yyyyMMddTHHmmss", [System.Globalization.CultureInfo]::InvariantCulture)
     }
     throw "Unsupported ICS date format: $Value"
 }
 
+# ============================================================
+# READ ICS EVENTS (Fixed encoding for Japanese/Shift-JIS)
+# ============================================================
+
 function Read-IcsEvents {
     param([string]$Path)
-    # Using System.Text.Encoding.Default to match local ANSI/Shift-JIS encoding and prevent garbled text
     $raw = [System.IO.File]::ReadAllText($Path, [System.Text.Encoding]::Default)
     $raw = $raw -replace "`r`n", "`n" -replace "`r", "`n" -replace "`n[ `t]", ""
     $lines = $raw -split "`n"
@@ -83,13 +114,18 @@ function Read-IcsEvents {
         if ($null -eq $current) { continue }
 
         $parts = $line -split ":", 2
-        if ($parts.Count -ne 2) { continue }
+        $partsCount = $parts.Count
+        if ($partsCount -ne 2) { continue }
 
         $propertyName = ($parts[0] -split ";")[0].ToUpper()
         $current.Properties[$propertyName] = $parts[1]
     }
     return @($events)
 }
+
+# ============================================================
+# FIND EXISTING WORKLOG EVENT
+# ============================================================
 
 function Find-ExistingWorklogEvent {
     param($Calendar, [string]$UID, [string]$Summary, [datetime]$Start)
@@ -126,6 +162,10 @@ function Find-ExistingWorklogEvent {
     return $null
 }
 
+# ============================================================
+# PROCESS LOCAL ICS FILE LOGIC
+# ============================================================
+
 function Invoke-ProcessIcs {
     param([string]$FilePath)
 
@@ -137,13 +177,20 @@ function Invoke-ProcessIcs {
     $skippedCount = 0
 
     try {
+        Write-Host ""
         Write-Host "[DETECTED] Processing local ICS file..." -ForegroundColor Cyan
+
+        # Brief pause to ensure OneDrive has fully released the sync write lock
+        Start-Sleep -Seconds 3
 
         $outlook = Connect-Outlook
         $namespace = $outlook.GetNamespace("MAPI")
         $calendar = $namespace.GetDefaultFolder(9)
 
         $events = Read-IcsEvents -Path $FilePath
+
+        Write-Host ""
+        Write-Host "Processing ICS events..."
 
         foreach ($icsEvent in $events) {
             $properties = $icsEvent.Properties
@@ -155,6 +202,7 @@ function Invoke-ProcessIcs {
             $location = Unescape-IcsText($properties["LOCATION"])
             $transp = $properties["TRANSP"]
 
+            # Determine BusyStatus: Out of Office = 3, Transparent (Free) = 0, Regular Busy = 2
             $targetBusyStatus = 2
             if ($summary -eq "Out of Office") {
                 $targetBusyStatus = 3
@@ -167,9 +215,12 @@ function Invoke-ProcessIcs {
                 $end = Parse-IcsDate($properties["DTEND"])
             }
             catch {
+                Write-Host "  [SKIP] Invalid date format for event: $summary" -ForegroundColor Yellow
                 $skippedCount++
                 continue
             }
+
+            Write-Host "  -> Processing: '$summary' ($($start.ToString('yyyy-MM-dd')))..." -NoNewline
 
             $existing = Find-ExistingWorklogEvent -Calendar $calendar -UID $uid -Summary $summary -Start $start
 
@@ -189,6 +240,8 @@ function Invoke-ProcessIcs {
 
                 [Runtime.InteropServices.Marshal]::ReleaseComObject($uidProperty) | Out-Null
                 [Runtime.InteropServices.Marshal]::ReleaseComObject($appointment) | Out-Null
+                
+                Write-Host " [CREATED]" -ForegroundColor Green
                 $createdCount++
             }
             else {
@@ -209,7 +262,9 @@ function Invoke-ProcessIcs {
                 if ($normExistingLoc -ne $normNewLoc) { $changeReasons += "Location" }
                 if ($existing.BusyStatus -ne $targetBusyStatus) { $changeReasons += "BusyStatus" }
 
-                if ($changeReasons.Count -gt 0) {
+                $hasChanges = ($changeReasons.Count -gt 0)
+
+                if ($hasChanges) {
                     $existing.Subject = $summary
                     $existing.Start = $start
                     $existing.End = $end
@@ -227,37 +282,50 @@ function Invoke-ProcessIcs {
                     $existing.Save()
                     if ($uidProperty) { [Runtime.InteropServices.Marshal]::ReleaseComObject($uidProperty) | Out-Null }
                     [Runtime.InteropServices.Marshal]::ReleaseComObject($existing) | Out-Null
+
+                    Write-Host " [UPDATED: $($changeReasons -join ', ')]" -ForegroundColor Cyan
                     $updatedCount++
                 }
                 else {
                     [Runtime.InteropServices.Marshal]::ReleaseComObject($existing) | Out-Null
+                    Write-Host " [SKIPPED - No Changes]" -ForegroundColor DarkGray
                     $skippedCount++
                 }
             }
         }
 
-        # Delete file after successful import
+        # Delete local ICS file after successful processing
         Remove-Item $FilePath -Force -ErrorAction SilentlyContinue
-        Write-Host "[SUCCESS] Imported. Created: $createdCount | Updated: $updatedCount | Skipped: $skippedCount" -ForegroundColor Green
+        Write-Host "[OK] Local ICS file processed and cleaned up." -ForegroundColor Green
     }
     catch {
-        Write-Host "[ERROR] $_" -ForegroundColor Red
+        Write-Host ""
+        Write-Host "========================================"
+        Write-Host "ERROR ENCOUNTERED:" -ForegroundColor Red
+        Write-Host $_ -ForegroundColor Red
+        Write-Host "========================================"
     }
     finally {
         if ($calendar) { [Runtime.InteropServices.Marshal]::ReleaseComObject($calendar) | Out-Null }
         if ($namespace) { [Runtime.InteropServices.Marshal]::ReleaseComObject($namespace) | Out-Null }
         if ($outlook) { [Runtime.InteropServices.Marshal]::ReleaseComObject($outlook) | Out-Null }
+
         [GC]::Collect()
         [GC]::WaitForPendingFinalizers()
 
         if ($script:StartedOutlookByScript) {
             Stop-Process -Name OUTLOOK -Force -ErrorAction SilentlyContinue
         }
+
+        Write-Host ""
+        Write-Host "========================================"
+        Write-Host "FINISHED. Created: $createdCount | Updated: $updatedCount | Skipped: $skippedCount"
+        Write-Host "========================================"
     }
 }
 
 # ============================================================
-# FILE SYSTEM WATCHER SETUP
+# FILE SYSTEM WATCHER SETUP (Background Listener)
 # ============================================================
 
 $watcher = New-Object System.IO.FileSystemWatcher
@@ -266,15 +334,17 @@ $watcher.Filter = $Filter
 $watcher.IncludeSubdirectories = $false
 $watcher.EnableRaisingEvents = $true
 
+Write-Host ""
 Write-Host "========================================"
 Write-Host "BACKGROUND ICS WATCHER ACTIVE"
 Write-Host "Watching: $LocalFolder"
 Write-Host "========================================"
+Write-Host "Keep this window minimized to run in background."
 
 $action = {
     $path = $Event.SourceEventArgs.FullPath
-    Start-Sleep -Seconds 3 # Wait for OneDrive sync lock to clear
-
+    
+    # Verify file is unlocked and fully synced
     $success = $false
     for ($i = 1; $i -le 5; $i++) {
         try {
