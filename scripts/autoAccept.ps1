@@ -57,38 +57,45 @@ function Connect-Outlook {
 
     for ($attempt = 1; $attempt -le $maxAttempts; $attempt++) {
         try {
-            $outlookProcess = Get-Process -Name "OUTLOOK" -ErrorAction SilentlyContinue
-            
-            if ($outlookProcess) {
-                try {
-                    $outlook = [System.Runtime.InteropServices.Marshal]::GetActiveObject("Outlook.Application")
-                } catch {
-                    $outlook = New-Object -ComObject Outlook.Application
-                }
-            } else {
-                $outlook = New-Object -ComObject Outlook.Application
-                $script:StartedOutlookByScript = $true
+            # Try to get active instance first via Marshal
+            try {
+                $outlook = [System.Runtime.InteropServices.Marshal]::GetActiveObject("Outlook.Application")
+            } catch {
+                $outlook = $null
             }
 
-            if ($null -ne $outlook) {
+            # If no active instance, create a new one via Activator/ProgID
+            if ($null -eq $outlook -or $outlook -is [string]) {
+                $outlookType = [Type]::GetTypeFromProgID("Outlook.Application")
+                if ($null -ne $outlookType) {
+                    $outlook = [Activator]::CreateInstance($outlookType)
+                    if ($null -eq (Get-Process -Name "OUTLOOK" -ErrorAction SilentlyContinue)) {
+                        $script:StartedOutlookByScript = $true
+                    }
+                }
+            }
+
+            # Verify it's a valid COM object and not a string/garbage
+            if ($null -ne $outlook -and $outlook -isnot [string]) {
                 $ns = $outlook.GetNamespace("MAPI")
                 if ($null -ne $ns) {
                     Release-ComObject $ns
                     Write-Output "[OK] Connected to Outlook successfully."
-                    break
+                    return $outlook
                 }
             }
         }
         catch {
-            Write-Output "Attempt $attempt of $maxAttempts failed to bind Outlook COM. Retrying..."
-            if ($attempt -eq $maxAttempts) {
-                throw "Failed to initialize Outlook COM interface: $_"
-            }
-            Start-Sleep -Seconds 3
+            Write-Output "Attempt $attempt of $maxAttempts failed to bind Outlook COM: $_. Retrying..."
         }
+
+        if ($attempt -eq $maxAttempts) {
+            throw "Failed to initialize Outlook COM interface after $maxAttempts attempts."
+        }
+        Start-Sleep -Seconds 3
     }
 
-    return $outlook
+    throw "Failed to initialize Outlook COM interface."
 }
 
 # ============================================================
