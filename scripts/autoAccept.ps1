@@ -1,6 +1,6 @@
 ﻿# ============================================================
 # Worklog ICS -> Outlook Calendar
-# FileSystemWatcher / Safe STA Main Loop
+# Polling / Safe STA Main Loop
 # ============================================================
 $ErrorActionPreference = "Stop"
 [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
@@ -26,7 +26,6 @@ if (-not (Test-Path $LocalFolder)) {
 }
 
 $script:StartedOutlookByScript = $false
-$script:ProcessTriggered = $false
 
 # ============================================================
 # SAFE COM RELEASE HELPER
@@ -556,80 +555,57 @@ function Invoke-ProcessIcs {
 }
 
 # ============================================================
-# FILE SYSTEM WATCHER
+# INITIALIZATION & STATE TRACKING
 # ============================================================
-$watcher = New-Object System.IO.FileSystemWatcher
-$watcher.Path = $LocalFolder
-$watcher.Filter = $Filter
-$watcher.IncludeSubdirectories = $false
-
-$watcher.NotifyFilter = (
-    [System.IO.NotifyFilters]::FileName -bor
-    [System.IO.NotifyFilters]::LastWrite -bor
-    [System.IO.NotifyFilters]::Size
-)
-
-$watcher.InternalBufferSize = 65536
-$watcher.EnableRaisingEvents = $true
+$script:lastProcessedWriteTime = $null
 
 Write-Output ""
 Write-Output "========================================"
-Write-Output "BACKGROUND ICS WATCHER ACTIVE"
+Write-Output "BACKGROUND ICS POLLER ACTIVE"
 Write-Output "Watching Folder: $LocalFolder"
 Write-Output "Watching File: $Filter"
 Write-Output "========================================"
 Write-Output "Keep this window minimized to run in background."
 
 # ============================================================
-# EVENT ACTION
-# ============================================================
-$action = {
-    $path = $Event.SourceEventArgs.FullPath
-
-    if ($path -ieq $TargetIcsFile) {
-        Write-Host "[EVENT] ICS file change detected: $path"
-        $script:ProcessTriggered = $true
-    }
-}
-
-# ============================================================
-# REGISTER EVENTS
-# ============================================================
-Register-ObjectEvent -InputObject $watcher -EventName "Created" -Action $action | Out-Null
-Register-ObjectEvent -InputObject $watcher -EventName "Changed" -Action $action | Out-Null
-Register-ObjectEvent -InputObject $watcher -EventName "Renamed" -Action $action | Out-Null
-
-# ============================================================
 # PROCESS EXISTING FILE ON STARTUP
 # ============================================================
 if (Test-Path $TargetIcsFile) {
     Write-Output "[INFO] Existing file detected on startup. Processing..."
+    $fileInfo = Get-Item $TargetIcsFile
+    $script:lastProcessedWriteTime = $fileInfo.LastWriteTime
     Invoke-ProcessIcs -FilePath $TargetIcsFile
 }
 
 # ============================================================
-# MAIN LOOP
+# MAIN POLLING LOOP
 # ============================================================
 try {
     while ($true) {
-        if ($script:ProcessTriggered) {
-            $script:ProcessTriggered = $false
-
-            if (Test-Path $TargetIcsFile) {
+        if (Test-Path $TargetIcsFile) {
+            $fileInfo = Get-Item $TargetIcsFile
+            
+            # Check if this is a genuinely new file sync (by comparing its LastWriteTime)
+            if ($null -eq $script:lastProcessedWriteTime -or $fileInfo.LastWriteTime -gt $script:lastProcessedWriteTime) {
+                Write-Host "[EVENT] New or updated ICS file detected: $TargetIcsFile"
+                
+                # Update tracker before processing so we don't loop on the same file instance
+                $script:lastProcessedWriteTime = $fileInfo.LastWriteTime
+                
                 Invoke-ProcessIcs -FilePath $TargetIcsFile
             }
         }
+        else {
+            # Reset tracker when the file is deleted so the next new file sync is caught instantly
+            if ($null -ne $script:lastProcessedWriteTime) {
+                $script:lastProcessedWriteTime = $null
+            }
+        }
 
-        Start-Sleep -Milliseconds 500
+        # Check every 3 seconds for new OneDrive cloud updates
+        Start-Sleep -Seconds 3
     }
 }
 finally {
-    Get-EventSubscriber |
-        Where-Object {
-            $_.SourceObject -eq $watcher
-        } |
-        Unregister-Event -Force -ErrorAction SilentlyContinue
-
-    $watcher.EnableRaisingEvents = $false
-    $watcher.Dispose()
+    Write-Output "Poller stopped."
 }
