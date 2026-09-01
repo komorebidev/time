@@ -1,18 +1,25 @@
 # ============================================================
-# Worklog ICS -> Outlook Calendar (OneDrive Watcher / Pure COM)
+# Worklog ICS -> Outlook Calendar (OneDrive Polling / Pure COM)
 # ============================================================
 
 $ErrorActionPreference = "Stop"
 
-# Force UTF-8 encoding for console output and standard streams
+# Force UTF-8 encoding for console output
 [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
 $OutputEncoding = [System.Text.Encoding]::UTF8
 
 # ============================================================
-# CONFIGURATION
+# CONFIGURATION (Dynamically locates OneDrive to avoid dash issues)
 # ============================================================
 
-$LocalFolder = "$env:USERPROFILE\OneDrive - エイラシステム株式会社\ics"
+$BaseOneDrive = Get-ChildItem "$env:USERPROFILE\OneDrive*" | Where-Object { $_.Name -like "*エイラシステム*" } | Select-Object -ExpandProperty FullName
+
+if (-not $BaseOneDrive) {
+    # Fallback if dynamic search fails
+    $BaseOneDrive = "$env:USERPROFILE\OneDrive - エイラシステム株式会社"
+}
+
+$LocalFolder = Join-Path $BaseOneDrive "ics"
 $Filter = "time.ics"
 $TargetIcsFile = Join-Path $LocalFolder $Filter
 
@@ -27,7 +34,6 @@ $script:StartedOutlookByScript = $false
 # ============================================================
 
 function Connect-Outlook {
-    Write-Output ""
     Write-Output "Connecting to Outlook via background COM..."
 
     $outlook = $null
@@ -100,7 +106,7 @@ function Parse-IcsDate {
 }
 
 # ============================================================
-# READ ICS EVENTS (Robust UTF-8 with BOM & Fallback Handling)
+# READ ICS EVENTS
 # ============================================================
 
 function Read-IcsEvents {
@@ -198,7 +204,7 @@ function Invoke-ProcessIcs {
         Write-Output ""
         Write-Output "[DETECTED] Processing local ICS file..."
 
-        Start-Sleep -Seconds 3
+        Start-Sleep -Seconds 2
 
         $outlook = Connect-Outlook
         $namespace = $outlook.GetNamespace("MAPI")
@@ -206,7 +212,6 @@ function Invoke-ProcessIcs {
 
         $events = Read-IcsEvents -Path $FilePath
 
-        Write-Output ""
         Write-Output "Processing ICS events..."
 
         foreach ($icsEvent in $events) {
@@ -340,57 +345,32 @@ function Invoke-ProcessIcs {
 }
 
 # ============================================================
-# FILE SYSTEM WATCHER SETUP (Background Listener)
+# BACKGROUND POLLING LOOP (Replaces unreliable FileSystemWatcher)
 # ============================================================
-
-$watcher = New-Object System.IO.FileSystemWatcher
-$watcher.Path = $LocalFolder
-$watcher.Filter = $Filter
-$watcher.IncludeSubdirectories = $false
-$watcher.EnableRaisingEvents = $true
 
 Write-Output ""
 Write-Output "========================================"
-Write-Output "BACKGROUND ICS WATCHER ACTIVE"
-Write-Output "Watching: $LocalFolder"
+Write-Output "BACKGROUND ICS POLLING ACTIVE"
+Write-Output "Watching Folder: $LocalFolder"
 Write-Output "========================================"
 Write-Output "Keep this window minimized to run in background."
 
-$action = {
-    $path = $Event.SourceEventArgs.FullPath
-    
-    $success = $false
-    for ($i = 1; $i -le 5; $i++) {
+while ($true) {
+    if (Test-Path $TargetIcsFile) {
+        # Check if file is fully written/unlocked by OneDrive
+        $ready = $false
         try {
-            if (Test-Path $path) {
-                $stream = [System.IO.File]::Open($path, 'Open', 'Read', 'None')
-                $stream.Close()
-                $stream.Dispose()
-                $success = $true
-                break
-            }
+            $stream = [System.IO.File]::Open($TargetIcsFile, 'Open', 'Read', 'None')
+            $stream.Close()
+            $stream.Dispose()
+            $ready = $true
         } catch {
-            Start-Sleep -Seconds 2
+            # File is still syncing/locked by OneDrive
+        }
+
+        if ($ready) {
+            Invoke-ProcessIcs -FilePath $TargetIcsFile
         }
     }
-
-    if ($success) {
-        Invoke-ProcessIcs -FilePath $path
-    }
-}
-
-Register-ObjectEvent $watcher "Created" -Action $action | Out-Null
-Register-ObjectEvent $watcher "Changed" -Action $action | Out-Null
-
-if (Test-Path $TargetIcsFile) {
-    Write-Output "[INFO] Existing file detected on startup. Processing..."
-    Invoke-ProcessIcs -FilePath $TargetIcsFile
-}
-
-try {
-    while ($true) { Start-Sleep -Seconds 1 }
-}
-finally {
-    Unregister-Event -SourceIdentifier *
-    $watcher.Dispose()
+    Start-Sleep -Seconds 3
 }
