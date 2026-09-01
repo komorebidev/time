@@ -1,18 +1,16 @@
-﻿<#
-.SYNOPSIS
-    Worklog ICS -> Outlook Calendar (FileSystemWatcher / Safe STA Main Loop)
-#>
-
+﻿============================================================
+Worklog ICS -> Outlook Calendar
+FileSystemWatcher / Safe STA Main Loop
+============================================================
 $ErrorActionPreference = "Stop"
 [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
 $OutputEncoding = [System.Text.Encoding]::UTF8
 
-# ============================================================
-# CONFIGURATION
-# ============================================================
-
+============================================================
+CONFIGURATION
+============================================================
 $BaseOneDrive = Get-ChildItem "$env:USERPROFILE\OneDrive*" |
-    Where-Object { $_.Name -like "*エイラシステム*" } |
+    Where-Object { $_.Name -like "エイラシステム" } |
     Select-Object -ExpandProperty FullName
 
 if (-not $BaseOneDrive) {
@@ -30,10 +28,9 @@ if (-not (Test-Path $LocalFolder)) {
 $script:StartedOutlookByScript = $false
 $script:ProcessTriggered = $false
 
-# ============================================================
-# SAFE COM RELEASE HELPER
-# ============================================================
-
+============================================================
+SAFE COM RELEASE HELPER
+============================================================
 function Release-ComObject {
     param($ComObject)
     
@@ -47,10 +44,9 @@ function Release-ComObject {
     }
 }
 
-# ============================================================
-# CONNECT TO OUTLOOK
-# ============================================================
-
+============================================================
+CONNECT TO OUTLOOK
+============================================================
 function Connect-Outlook {
     Write-Host "Connecting to Outlook via COM..."
     $outlook = $null
@@ -99,13 +95,12 @@ function Connect-Outlook {
     throw "Failed to initialize Outlook COM interface after $maxAttempts attempts."
 }
 
-# ============================================================
-# ICS TEXT UNESCAPING
-# ============================================================
-
+============================================================
+ICS TEXT UNESCAPING
+============================================================
 function Unescape-IcsText {
     param([string]$Text)
-    
+
     if ($null -eq $Text) {
         return ""
     }
@@ -119,13 +114,12 @@ function Unescape-IcsText {
     return $Text
 }
 
-# ============================================================
-# ICS DATE PARSER
-# ============================================================
-
+============================================================
+ICS DATE PARSER
+============================================================
 function Parse-IcsDate {
     param([string]$Value)
-    
+
     if ([string]::IsNullOrWhiteSpace($Value)) {
         throw "ICS date value is empty."
     }
@@ -160,13 +154,12 @@ function Parse-IcsDate {
     throw "Unsupported ICS date format: $Value"
 }
 
-# ============================================================
-# READ ICS EVENTS
-# ============================================================
-
+============================================================
+READ ICS EVENTS
+============================================================
 function Read-IcsEvents {
     param([string]$Path)
-    
+
     $bytes = [System.IO.File]::ReadAllBytes($Path)
     $raw = ""
 
@@ -196,6 +189,8 @@ function Read-IcsEvents {
 
     $raw = $raw -replace "`r`n", "`n"
     $raw = $raw -replace "`r", "`n"
+
+    # ICS line unfolding
     $raw = $raw -replace "`n[ `t]", ""
 
     $lines = $raw -split "`n"
@@ -216,6 +211,7 @@ function Read-IcsEvents {
             if ($null -ne $current) {
                 $events += $current
             }
+
             $current = $null
             continue
         }
@@ -237,10 +233,9 @@ function Read-IcsEvents {
     return @($events)
 }
 
-# ============================================================
-# FIND EXISTING WORKLOG EVENT
-# ============================================================
-
+============================================================
+FIND EXISTING WORKLOG EVENT
+============================================================
 function Find-ExistingWorklogEvent {
     param(
         $Calendar,
@@ -248,7 +243,7 @@ function Find-ExistingWorklogEvent {
         [string]$Summary,
         [datetime]$Start
     )
-    
+
     $items = $null
 
     try {
@@ -308,13 +303,12 @@ function Find-ExistingWorklogEvent {
     return $null
 }
 
-# ============================================================
-# PROCESS LOCAL ICS FILE LOGIC
-# ============================================================
-
+============================================================
+PROCESS LOCAL ICS FILE
+============================================================
 function Invoke-ProcessIcs {
     param([string]$FilePath)
-    
+
     if (-not (Test-Path $FilePath)) {
         return
     }
@@ -331,7 +325,42 @@ function Invoke-ProcessIcs {
         Write-Output ""
         Write-Output "[DETECTED] Processing local ICS file..."
 
+        # Give OneDrive a moment to finish the sync operation
         Start-Sleep -Seconds 2
+
+        # Verify that the file can be opened exclusively
+        $fileReady = $false
+
+        for ($attempt = 1; $attempt -le 10; $attempt++) {
+            try {
+                if (-not (Test-Path $FilePath)) {
+                    return
+                }
+
+                $stream = [System.IO.File]::Open(
+                    $FilePath,
+                    'Open',
+                    'Read',
+                    'None'
+                )
+
+                $stream.Close()
+                $stream.Dispose()
+
+                $fileReady = $true
+                break
+            }
+            catch {
+                if ($attempt -lt 10) {
+                    Start-Sleep -Seconds 1
+                }
+            }
+        }
+
+        if (-not $fileReady) {
+            Write-Output "[WAIT] ICS file is still being written/locked."
+            return
+        }
 
         $outlook = Connect-Outlook
         $namespace = $outlook.GetNamespace("MAPI")
@@ -382,6 +411,9 @@ function Invoke-ProcessIcs {
                 -Summary $summary `
                 -Start $start
 
+            # ====================================================
+            # CREATE NEW EVENT
+            # ====================================================
             if ($null -eq $existing) {
                 $appointment = $calendar.Items.Add(1)
 
@@ -408,9 +440,13 @@ function Invoke-ProcessIcs {
                 Write-Output "  [CREATED]"
                 $createdCount++
             }
+            # ====================================================
+            # UPDATE EXISTING EVENT
+            # ====================================================
             else {
                 $normExistingBody = if ($null -eq $existing.Body) { "" } else { "$($existing.Body)".Replace("`r`n", "`n").Trim() }
                 $normNewBody = if ($null -eq $description) { "" } else { "$description".Replace("`r`n", "`n").Trim() }
+
                 $normExistingLoc = if ($null -eq $existing.Location) { "" } else { "$($existing.Location)".Trim() }
                 $normNewLoc = if ($null -eq $location) { "" } else { "$location".Trim() }
 
@@ -419,12 +455,29 @@ function Invoke-ProcessIcs {
 
                 $changeReasons = @()
 
-                if ($existing.Subject -ne $summary) { $changeReasons += "Subject" }
-                if ($existingStart.Date -ne $start.Date) { $changeReasons += "Start Date" }
-                if ($existingEnd.Date -ne $end.Date) { $changeReasons += "End Date" }
-                if ($normExistingBody -ne $normNewBody) { $changeReasons += "Body" }
-                if ($normExistingLoc -ne $normNewLoc) { $changeReasons += "Location" }
-                if ($existing.BusyStatus -ne $targetBusyStatus) { $changeReasons += "BusyStatus" }
+                if ($existing.Subject -ne $summary) {
+                    $changeReasons += "Subject"
+                }
+
+                if ($existingStart.Date -ne $start.Date) {
+                    $changeReasons += "Start Date"
+                }
+
+                if ($existingEnd.Date -ne $end.Date) {
+                    $changeReasons += "End Date"
+                }
+
+                if ($normExistingBody -ne $normNewBody) {
+                    $changeReasons += "Body"
+                }
+
+                if ($normExistingLoc -ne $normNewLoc) {
+                    $changeReasons += "Location"
+                }
+
+                if ($existing.BusyStatus -ne $targetBusyStatus) {
+                    $changeReasons += "BusyStatus"
+                }
 
                 $hasChanges = ($changeReasons.Count -gt 0)
 
@@ -458,12 +511,16 @@ function Invoke-ProcessIcs {
                 }
                 else {
                     Release-ComObject $existing
+
                     Write-Output "  [SKIPPED - No Changes]"
                     $skippedCount++
                 }
             }
         }
 
+        # ========================================================
+        # DELETE PROCESSED FILE
+        # ========================================================
         Remove-Item $FilePath -Force -ErrorAction SilentlyContinue
         Write-Output "[OK] Local ICS file processed and cleaned up."
     }
@@ -484,6 +541,7 @@ function Invoke-ProcessIcs {
 
         if ($script:StartedOutlookByScript) {
             Stop-Process -Name OUTLOOK -Force -ErrorAction SilentlyContinue
+            $script:StartedOutlookByScript = $false
         }
 
         Write-Output ""
@@ -493,89 +551,91 @@ function Invoke-ProcessIcs {
     }
 }
 
-# ============================================================
-# FILE SYSTEM WATCHER SETUP
-# ============================================================
-
+============================================================
+FILE SYSTEM WATCHER
+============================================================
 $watcher = New-Object System.IO.FileSystemWatcher
 $watcher.Path = $LocalFolder
 $watcher.Filter = $Filter
 $watcher.IncludeSubdirectories = $false
+
+# Watch the types of changes OneDrive is likely to generate
+$watcher.NotifyFilter = (
+    [System.IO.NotifyFilters]::FileName -bor
+    [System.IO.NotifyFilters]::LastWrite -bor
+    [System.IO.NotifyFilters]::Size
+)
+
+# Increase internal event buffer
+$watcher.InternalBufferSize = 65536
 $watcher.EnableRaisingEvents = $true
 
 Write-Output ""
 Write-Output "========================================"
 Write-Output "BACKGROUND ICS WATCHER ACTIVE"
 Write-Output "Watching Folder: $LocalFolder"
+Write-Output "Watching File: $Filter"
 Write-Output "========================================"
 Write-Output "Keep this window minimized to run in background."
 
-# ============================================================
-# FILE SYSTEM EVENT ACTION
-# ============================================================
-
+============================================================
+EVENT ACTION
+============================================================
 $action = {
     $path = $Event.SourceEventArgs.FullPath
-    $success = $false
 
-    for ($i = 1; $i -le 5; $i++) {
-        try {
-            if (Test-Path $path) {
-                $stream = [System.IO.File]::Open(
-                    $path,
-                    'Open',
-                    'Read',
-                    'None'
-                )
+    if ($path -ieq $TargetIcsFile) {
+        Write-Host "[EVENT] ICS file change detected: $path"
 
-                $stream.Close()
-                $stream.Dispose()
-
-                $success = $true
-                break
-            }
-        }
-        catch {
-            Start-Sleep -Seconds 2
-        }
-    }
-
-    if ($success) {
+        # Only set a flag.
+        # Actual Outlook COM processing stays on the main STA thread.
         $script:ProcessTriggered = $true
     }
 }
 
-# ============================================================
-# REGISTER FILE EVENTS
-# ============================================================
+============================================================
+REGISTER EVENTS
+============================================================
+Register-ObjectEvent -InputObject $watcher -EventName Created -Action $action -SourceIdentifier "WorklogICS.Created" | Out-Null
+Register-ObjectEvent -InputObject $watcher -EventName Changed -Action $action -SourceIdentifier "WorklogICS.Changed" | Out-Null
+Register-ObjectEvent -InputObject $watcher -EventName Renamed -Action $action -SourceIdentifier "WorklogICS.Renamed" | Out-Null
 
-Register-ObjectEvent $watcher "Created" -Action $action | Out-Null
-Register-ObjectEvent $watcher "Changed" -Action $action | Out-Null
-
-# ============================================================
-# PROCESS EXISTING FILE ON STARTUP
-# ============================================================
-
+============================================================
+PROCESS EXISTING FILE ON STARTUP
+============================================================
 if (Test-Path $TargetIcsFile) {
     Write-Output "[INFO] Existing file detected on startup. Processing..."
     Invoke-ProcessIcs -FilePath $TargetIcsFile
 }
 
-# ============================================================
-# MAIN LOOP
-# ============================================================
-
+============================================================
+MAIN STA LOOP
+============================================================
 try {
     while ($true) {
         if ($script:ProcessTriggered) {
             $script:ProcessTriggered = $false
-            Invoke-ProcessIcs -FilePath $TargetIcsFile
+
+            if (Test-Path $TargetIcsFile) {
+                Invoke-ProcessIcs -FilePath $TargetIcsFile
+            }
         }
 
-        Start-Sleep -Seconds 1
+        # This is NOT polling for the file.
+        # It simply keeps the STA thread alive and allows
+        # PowerShell's FileSystemWatcher events to be processed.
+        Start-Sleep -Milliseconds 500
     }
 }
 finally {
-    Unregister-Event -SourceIdentifier *
+    Unregister-Event -SourceIdentifier "WorklogICS.Created" -ErrorAction SilentlyContinue
+    Unregister-Event -SourceIdentifier "WorklogICS.Changed" -ErrorAction SilentlyContinue
+    Unregister-Event -SourceIdentifier "WorklogICS.Renamed" -ErrorAction SilentlyContinue
+
+    Get-Job |
+        Where-Object { $_.Name -like "WorklogICS*" } |
+        Remove-Job -Force -ErrorAction SilentlyContinue
+
+    $watcher.EnableRaisingEvents = $false
     $watcher.Dispose()
 }
