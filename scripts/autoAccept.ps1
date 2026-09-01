@@ -1,49 +1,39 @@
-# ============================================================
-# Worklog ICS -> Outlook Calendar (Pure COM / Completely Silent)
-# ============================================================
-
 $ErrorActionPreference = "Stop"
 
 # ============================================================
 # CONFIGURATION
 # ============================================================
+$LocalFolder = "$env:USERPROFILE\OneDrive - エイラシステム株式会社\ics"
+$Filter = "time.ics"
 
-$SubjectSearch = "Work Log ICS:"
-$AttachmentName = "time.ics"
-$TempICS = Join-Path $env:TEMP "worklog-time.ics"
+if (-not (Test-Path $LocalFolder)) {
+    New-Item -ItemType Directory -Path $LocalFolder -Force | Out-Null
+}
 
 $script:StartedOutlookByScript = $false
 
 # ============================================================
-# CONNECT TO OUTLOOK (PURE COM BACKGROUND INSTANTIATION)
+# OUTLOOK COM & ICS FUNCTIONS
 # ============================================================
 
 function Connect-Outlook {
-    Write-Host ""
-    Write-Host "Connecting to Outlook via background COM..."
-
     $outlook = $null
     $maxAttempts = 10
 
     for ($attempt = 1; $attempt -le $maxAttempts; $attempt++) {
         try {
             $outlook = [Runtime.InteropServices.Marshal]::GetActiveObject("Outlook.Application") -as [Microsoft.Office.Interop.Outlook.Application]
-            if ($null -eq $outlook) {
-                throw "No active instance found."
-            }
-            Write-Host "[OK] Connected to active Outlook instance"
-            break
+            if ($null -ne $outlook) { break }
+            throw "No active instance found."
         }
         catch {
             try {
                 $outlookType = [Type]::GetTypeFromProgID("Outlook.Application")
                 $outlook = [Activator]::CreateInstance($outlookType)
                 $script:StartedOutlookByScript = $true
-                Write-Host "[OK] Created background Outlook COM instance"
                 break
             }
             catch {
-                Write-Host "Attempt $attempt of $maxAttempts failed to bind Outlook COM. Retrying..."
                 if ($attempt -eq $maxAttempts) {
                     throw "Failed to initialize Outlook COM interface: $_"
                 }
@@ -51,28 +41,15 @@ function Connect-Outlook {
             }
         }
     }
-
     return $outlook
 }
-
-# ============================================================
-# ICS TEXT UNESCAPING
-# ============================================================
 
 function Unescape-IcsText {
     param([string]$Text)
     if ($null -eq $Text) { return "" }
-    $Text = $Text -replace '\\n', "`r`n"
-    $Text = $Text -replace '\\N', "`r`n"
-    $Text = $Text -replace '\\,', ","
-    $Text = $Text -replace '\\;', ";"
-    $Text = $Text -replace '\\\\', "\"
+    $Text = $Text -replace '\\n', "`r`n" -replace '\\N', "`r`n" -replace '\\,', "," -replace '\\;', ";" -replace '\\\\', "\"
     return $Text
 }
-
-# ============================================================
-# ICS DATE PARSER
-# ============================================================
 
 function Parse-IcsDate {
     param([string]$Value)
@@ -90,10 +67,6 @@ function Parse-IcsDate {
     throw "Unsupported ICS date format: $Value"
 }
 
-# ============================================================
-# READ ICS EVENTS
-# ============================================================
-
 function Read-IcsEvents {
     param([string]$Path)
     $raw = [System.IO.File]::ReadAllText($Path, [System.Text.Encoding]::UTF8)
@@ -109,18 +82,13 @@ function Read-IcsEvents {
         if ($null -eq $current) { continue }
 
         $parts = $line -split ":", 2
-        $partsCount = $parts.Count
-        if ($partsCount -ne 2) { continue }
+        if ($parts.Count -ne 2) { continue }
 
         $propertyName = ($parts[0] -split ";")[0].ToUpper()
         $current.Properties[$propertyName] = $parts[1]
     }
     return @($events)
 }
-
-# ============================================================
-# FIND EXISTING WORKLOG EVENT
-# ============================================================
 
 function Find-ExistingWorklogEvent {
     param($Calendar, [string]$UID, [string]$Summary, [datetime]$Start)
@@ -157,98 +125,24 @@ function Find-ExistingWorklogEvent {
     return $null
 }
 
-# ============================================================
-# MAIN VARIABLES
-# ============================================================
+function Invoke-ProcessIcs {
+    param([string]$FilePath)
 
-$outlook = $null
-$namespace = $null
-$inbox = $null
-$calendar = $null
-$targetMail = $null
-$targetMailEntryId = $null
-$icsAttachment = $null
-$createdCount = 0
-$updatedCount = 0
-$skippedCount = 0
-$scriptFailed = $false
+    $outlook = $null
+    $namespace = $null
+    $calendar = $null
+    $createdCount = 0
+    $updatedCount = 0
+    $skippedCount = 0
 
-# ============================================================
-# MAIN
-# ============================================================
+    try {
+        Write-Host "[DETECTED] Processing local ICS file..." -ForegroundColor Cyan
 
-try {
-    Write-Host ""
-    Write-Host "========================================"
-    Write-Host "WORKLOG OUTLOOK IMPORTER"
-    Write-Host "========================================"
-    Write-Host ""
+        $outlook = Connect-Outlook
+        $namespace = $outlook.GetNamespace("MAPI")
+        $calendar = $namespace.GetDefaultFolder(9)
 
-    $outlook = Connect-Outlook
-    $namespace = $outlook.GetNamespace("MAPI")
-    $inbox = $namespace.GetDefaultFolder(6)
-    $calendar = $namespace.GetDefaultFolder(9)
-
-    Write-Host ""
-    Write-Host "Scanning Inbox items directly..."
-
-    $items = $inbox.Items
-    $items.Sort("[ReceivedTime]", $true)
-    $count = $items.Count
-    
-    for ($index = 1; $index -le $count; $index++) {
-        $mail = $items.Item($index)
-        if ($mail.Class -eq 43 -and $mail.Subject -like "*$SubjectSearch*") {
-            $hasTargetAttachment = $false
-            foreach ($att in $mail.Attachments) {
-                if ($att.FileName -ieq $AttachmentName) {
-                    $hasTargetAttachment = $true
-                    [Runtime.InteropServices.Marshal]::ReleaseComObject($att) | Out-Null
-                    break
-                }
-                [Runtime.InteropServices.Marshal]::ReleaseComObject($att) | Out-Null
-            }
-
-            if ($hasTargetAttachment) {
-                $targetMail = $mail
-                $targetMailEntryId = $targetMail.EntryID
-                break
-            }
-        }
-        [Runtime.InteropServices.Marshal]::ReleaseComObject($mail) | Out-Null
-    }
-    [Runtime.InteropServices.Marshal]::ReleaseComObject($items) | Out-Null
-
-    if ($null -eq $targetMail) {
-        Write-Host "No Work Log ICS emails found."
-    }
-    else {
-        Write-Host "Found matching email: $($targetMail.Subject)"
-        
-        foreach ($att in $targetMail.Attachments) {
-            if ($att.FileName -ieq $AttachmentName) {
-                $icsAttachment = $att
-                break
-            }
-            [Runtime.InteropServices.Marshal]::ReleaseComObject($att) | Out-Null
-        }
-
-        if ($null -eq $icsAttachment) {
-            throw "time.ics attachment not found on target email."
-        }
-
-        if (Test-Path $TempICS) { Remove-Item $TempICS -Force -ErrorAction SilentlyContinue }
-        $icsAttachment.SaveAsFile($TempICS)
-        
-        $events = Read-IcsEvents -Path $TempICS
-
-        [Runtime.InteropServices.Marshal]::ReleaseComObject($icsAttachment) | Out-Null
-        $icsAttachment = $null
-
-        if (Test-Path $TempICS) { Remove-Item $TempICS -Force -ErrorAction SilentlyContinue }
-
-        Write-Host ""
-        Write-Host "Processing ICS events..."
+        $events = Read-IcsEvents -Path $FilePath
 
         foreach ($icsEvent in $events) {
             $properties = $icsEvent.Properties
@@ -260,7 +154,6 @@ try {
             $location = Unescape-IcsText($properties["LOCATION"])
             $transp = $properties["TRANSP"]
 
-            # Determine BusyStatus: Out of Office = 3, Transparent (Free) = 0, Regular Busy = 2
             $targetBusyStatus = 2
             if ($summary -eq "Out of Office") {
                 $targetBusyStatus = 3
@@ -273,12 +166,9 @@ try {
                 $end = Parse-IcsDate($properties["DTEND"])
             }
             catch {
-                Write-Host "  [SKIP] Invalid date format for event: $summary" -ForegroundColor Yellow
                 $skippedCount++
                 continue
             }
-
-            Write-Host "  -> Processing: '$summary' ($($start.ToString('yyyy-MM-dd')))..." -NoNewline
 
             $existing = Find-ExistingWorklogEvent -Calendar $calendar -UID $uid -Summary $summary -Start $start
 
@@ -298,8 +188,6 @@ try {
 
                 [Runtime.InteropServices.Marshal]::ReleaseComObject($uidProperty) | Out-Null
                 [Runtime.InteropServices.Marshal]::ReleaseComObject($appointment) | Out-Null
-                
-                Write-Host " [CREATED]" -ForegroundColor Green
                 $createdCount++
             }
             else {
@@ -312,7 +200,6 @@ try {
                 $existingStart = [datetime]$existing.Start
                 $existingEnd = [datetime]$existing.End
 
-                # Build a detailed list of what differs for debugging/reporting
                 $changeReasons = @()
                 if ($existing.Subject -ne $summary) { $changeReasons += "Subject" }
                 if ($existingStart.Date -ne $start.Date) { $changeReasons += "Start Date" }
@@ -321,9 +208,7 @@ try {
                 if ($normExistingLoc -ne $normNewLoc) { $changeReasons += "Location" }
                 if ($existing.BusyStatus -ne $targetBusyStatus) { $changeReasons += "BusyStatus" }
 
-                $hasChanges = ($changeReasons.Count -gt 0)
-
-                if ($hasChanges) {
+                if ($changeReasons.Count -gt 0) {
                     $existing.Subject = $summary
                     $existing.Start = $start
                     $existing.End = $end
@@ -341,77 +226,79 @@ try {
                     $existing.Save()
                     if ($uidProperty) { [Runtime.InteropServices.Marshal]::ReleaseComObject($uidProperty) | Out-Null }
                     [Runtime.InteropServices.Marshal]::ReleaseComObject($existing) | Out-Null
-
-                    Write-Host " [UPDATED: $($changeReasons -join ', ')]" -ForegroundColor Cyan
                     $updatedCount++
                 }
                 else {
                     [Runtime.InteropServices.Marshal]::ReleaseComObject($existing) | Out-Null
-                    Write-Host " [SKIPPED - No Changes]" -ForegroundColor DarkGray
                     $skippedCount++
                 }
             }
         }
 
-        Write-Host ""
-        Write-Host "Deleting processed email..."
-        try {
-            if ($targetMail) {
-                [Runtime.InteropServices.Marshal]::ReleaseComObject($targetMail) | Out-Null
-                $targetMail = $null
-            }
-            $itemToDelete = $namespace.GetItemFromID($targetMailEntryId)
-            $itemToDelete.Delete()
-            [Runtime.InteropServices.Marshal]::ReleaseComObject($itemToDelete) | Out-Null
-            Write-Host "[OK] Email successfully deleted."
+        # Delete file after successful import
+        Remove-Item $FilePath -Force -ErrorAction SilentlyContinue
+        Write-Host "[SUCCESS] Imported. Created: $createdCount | Updated: $updatedCount | Skipped: $skippedCount" -ForegroundColor Green
+    }
+    catch {
+        Write-Host "[ERROR] $_" -ForegroundColor Red
+    }
+    finally {
+        if ($calendar) { [Runtime.InteropServices.Marshal]::ReleaseComObject($calendar) | Out-Null }
+        if ($namespace) { [Runtime.InteropServices.Marshal]::ReleaseComObject($namespace) | Out-Null }
+        if ($outlook) { [Runtime.InteropServices.Marshal]::ReleaseComObject($outlook) | Out-Null }
+        [GC]::Collect()
+        [GC]::WaitForPendingFinalizers()
+
+        if ($script:StartedOutlookByScript) {
+            Stop-Process -Name OUTLOOK -Force -ErrorAction SilentlyContinue
         }
-        catch {
-            Write-Host "Warning: Deletion encountered issue: $_"
+    }
+}
+
+# ============================================================
+# FILE SYSTEM WATCHER SETUP
+# ============================================================
+
+$watcher = New-Object System.IO.FileSystemWatcher
+$watcher.Path = $LocalFolder
+$watcher.Filter = $Filter
+$watcher.IncludeSubdirectories = $false
+$watcher.EnableRaisingEvents = $true
+
+Write-Host "========================================"
+Write-Host "BACKGROUND ICS WATCHER ACTIVE"
+Write-Host "Watching: $LocalFolder"
+Write-Host "========================================"
+
+$action = {
+    $path = $Event.SourceEventArgs.FullPath
+    Start-Sleep -Seconds 3 # Wait for OneDrive sync lock to clear
+
+    $success = $false
+    for ($i = 1; $i -le 5; $i++) {
+        try {
+            $stream = [System.IO.File]::Open($path, 'Open', 'Read', 'None')
+            $stream.Close()
+            $stream.Dispose()
+            $success = $true
+            break
+        } catch {
+            Start-Sleep -Seconds 2
         }
     }
 
+    if ($success) {
+        Invoke-ProcessIcs -FilePath $path
+    }
 }
-catch {
-    $scriptFailed = $true
-    Write-Host ""
-    Write-Host "========================================"
-    Write-Host "ERROR ENCOUNTERED:" -ForegroundColor Red
-    Write-Host $_ -ForegroundColor Red
-    Write-Host "========================================"
+
+Register-ObjectEvent $watcher "Created" -Action $action | Out-Null
+Register-ObjectEvent $watcher "Changed" -Action $action | Out-Null
+
+try {
+    while ($true) { Start-Sleep -Seconds 1 }
 }
 finally {
-    if ($icsAttachment) { [Runtime.InteropServices.Marshal]::ReleaseComObject($icsAttachment) | Out-Null }
-    if ($targetMail) { [Runtime.InteropServices.Marshal]::ReleaseComObject($targetMail) | Out-Null }
-    if ($calendar) { [Runtime.InteropServices.Marshal]::ReleaseComObject($calendar) | Out-Null }
-    if ($inbox) { [Runtime.InteropServices.Marshal]::ReleaseComObject($inbox) | Out-Null }
-    if ($namespace) { [Runtime.InteropServices.Marshal]::ReleaseComObject($namespace) | Out-Null }
-    if ($outlook) { [Runtime.InteropServices.Marshal]::ReleaseComObject($outlook) | Out-Null }
-
-    [GC]::Collect()
-    [GC]::WaitForPendingFinalizers()
-
-    if (Test-Path $TempICS) { Remove-Item $TempICS -Force -ErrorAction SilentlyContinue }
-
-    if ($script:StartedOutlookByScript) {
-        Stop-Process -Name OUTLOOK -Force -ErrorAction SilentlyContinue
-    }
-
-    Write-Host ""
-    Write-Host "========================================"
-    Write-Host "FINISHED. Created: $createdCount | Updated: $updatedCount | Skipped: $skippedCount"
-    Write-Host "========================================"
-
-    Write-Host "Closing in 5 seconds... Press any key to stay open."
-    
-    $sw = [Diagnostics.Stopwatch]::StartNew()
-    while ($sw.ElapsedMilliseconds -lt 5000) {
-        if ([Console]::KeyAvailable) {
-            $null = [Console]::ReadKey($true)
-            Write-Host "Pause requested. Press any key to exit."
-            $null = [Console]::ReadKey($true)
-            break
-        }
-        Start-Sleep -Milliseconds 100
-    }
-    $sw.Stop()
+    Unregister-Event -SourceIdentifier *
+    $watcher.Dispose()
 }
