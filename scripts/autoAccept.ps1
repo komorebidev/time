@@ -94,6 +94,9 @@ for ($attempt = 1; $attempt -le $maxAttempts; $attempt++) {
 
                 if ($null -ne $ns) {
                     Write-Host "[OK] Connected to Outlook successfully."
+
+                    # IMPORTANT:
+                    # Only return the Outlook COM object.
                     return $outlook
                 }
             }
@@ -224,6 +227,7 @@ else {
     }
 }
 
+# Normalize line endings
 $raw = $raw -replace "`r`n", "`n"
 $raw = $raw -replace "`r", "`n"
 
@@ -236,16 +240,20 @@ $events = @()
 $current = $null
 
 foreach ($line in $lines) {
+
     $line = $line.TrimEnd()
 
     if ($line -eq "BEGIN:VEVENT") {
+
         $current = @{
             Properties = @{}
         }
+
         continue
     }
 
     if ($line -eq "END:VEVENT") {
+
         if ($null -ne $current) {
             $events += $current
         }
@@ -292,6 +300,7 @@ $Calendar,
 $items = $null
 
 try {
+
     $items = $Calendar.Items
     $count = $items.Count
 
@@ -300,6 +309,7 @@ try {
         $item = $null
 
         try {
+
             $item = $items.Item($index)
 
             if ($null -eq $item) {
@@ -314,6 +324,7 @@ try {
             $property = $null
 
             try {
+
                 $property = $item.UserProperties.Find("WorklogUID")
 
                 if (
@@ -339,11 +350,13 @@ try {
             Release-ComObject $item
         }
         catch {
+
             Release-ComObject $item
         }
     }
 }
 finally {
+
     Release-ComObject $items
 }
 
@@ -379,13 +392,17 @@ try {
     Write-Output ""
     Write-Output "[DETECTED] Processing local ICS file..."
 
-    # Give OneDrive a moment to finish the sync operation
+    # Give OneDrive a moment to finish writing/syncing.
     Start-Sleep -Seconds 2
 
-    # Verify that the file can be opened exclusively
+    # ====================================================
+    # WAIT UNTIL FILE IS AVAILABLE
+    # ====================================================
+
     $fileReady = $false
 
     for ($attempt = 1; $attempt -le 10; $attempt++) {
+
         try {
 
             if (-not (Test-Path $FilePath)) {
@@ -414,14 +431,24 @@ try {
     }
 
     if (-not $fileReady) {
-        Write-Output "[WAIT] ICS file is still being written/locked."
+
+        Write-Output "[WAIT] ICS file is still being written or locked."
+
         return
     }
+
+    # ====================================================
+    # CONNECT TO OUTLOOK
+    # ====================================================
 
     $outlook = Connect-Outlook
 
     $namespace = $outlook.GetNamespace("MAPI")
     $calendar = $namespace.GetDefaultFolder(9)
+
+    # ====================================================
+    # READ ICS
+    # ====================================================
 
     $events = Read-IcsEvents -Path $FilePath
 
@@ -434,6 +461,7 @@ try {
         $uid = $properties["UID"]
 
         if ([string]::IsNullOrWhiteSpace($uid)) {
+
             $skippedCount++
             continue
         }
@@ -452,11 +480,14 @@ try {
             $targetBusyStatus = 0
         }
 
+        # =================================================
+        # PARSE DATES
+        # =================================================
+
         try {
 
             $start = Parse-IcsDate $properties["DTSTART"]
             $end = Parse-IcsDate $properties["DTEND"]
-
         }
         catch {
 
@@ -468,6 +499,9 @@ try {
 
         Write-Output "  -> Processing: '$summary' ($($start.ToString('yyyy-MM-dd')))..."
 
+        # =================================================
+        # FIND EXISTING EVENT
+        # =================================================
 
         $existing = Find-ExistingWorklogEvent `
             -Calendar $calendar `
@@ -475,10 +509,9 @@ try {
             -Summary $summary `
             -Start $start
 
-
-        # ====================================================
-        # CREATE NEW EVENT
-        # ====================================================
+        # =================================================
+        # CREATE
+        # =================================================
 
         if ($null -eq $existing) {
 
@@ -510,9 +543,9 @@ try {
             $createdCount++
         }
 
-        # ====================================================
-        # UPDATE EXISTING EVENT
-        # ====================================================
+        # =================================================
+        # UPDATE
+        # =================================================
 
         else {
 
@@ -592,6 +625,7 @@ try {
                 $uidProperty = $existing.UserProperties.Find("WorklogUID")
 
                 if ($null -eq $uidProperty) {
+
                     $uidProperty = $existing.UserProperties.Add(
                         "WorklogUID",
                         1,
@@ -621,9 +655,9 @@ try {
         }
     }
 
-    # ========================================================
-    # DELETE PROCESSED FILE
-    # ========================================================
+    # ====================================================
+    # REMOVE PROCESSED FILE
+    # ====================================================
 
     Remove-Item $FilePath -Force -ErrorAction SilentlyContinue
 
@@ -647,7 +681,12 @@ finally {
     [GC]::WaitForPendingFinalizers()
 
     if ($script:StartedOutlookByScript) {
-        Stop-Process -Name OUTLOOK -Force -ErrorAction SilentlyContinue
+
+        Stop-Process `
+            -Name OUTLOOK `
+            -Force `
+            -ErrorAction SilentlyContinue
+
         $script:StartedOutlookByScript = $false
     }
 
@@ -662,7 +701,7 @@ finally {
 
 # ============================================================
 
-# FILE SYSTEM WATCHER
+# FILE SYSTEM WATCHER SETUP
 
 # ============================================================
 
@@ -672,18 +711,13 @@ $watcher.Path = $LocalFolder
 $watcher.Filter = $Filter
 $watcher.IncludeSubdirectories = $false
 
-# Watch the types of changes OneDrive is likely to generate
-
 $watcher.NotifyFilter = (
 [System.IO.NotifyFilters]::FileName -bor
 [System.IO.NotifyFilters]::LastWrite -bor
 [System.IO.NotifyFilters]::Size
 )
 
-# Increase internal event buffer
-
 $watcher.InternalBufferSize = 65536
-
 $watcher.EnableRaisingEvents = $true
 
 Write-Output ""
@@ -696,7 +730,7 @@ Write-Output "Keep this window minimized to run in background."
 
 # ============================================================
 
-# EVENT ACTION
+# FILE SYSTEM EVENT ACTION
 
 # ============================================================
 
@@ -709,8 +743,8 @@ if ($path -ieq $TargetIcsFile) {
 
     Write-Host "[EVENT] ICS file change detected: $path"
 
-    # Only set a flag.
-    # Actual Outlook COM processing stays on the main STA thread.
+    # Do not touch Outlook from the event handler.
+    # Set a flag and let the main STA thread process it.
     $script:ProcessTriggered = $true
 }
 ```
@@ -723,20 +757,9 @@ if ($path -ieq $TargetIcsFile) {
 
 # ============================================================
 
-Register-ObjectEvent `    -InputObject $watcher`
--EventName Created `    -Action $action`
--SourceIdentifier "WorklogICS.Created" |
-Out-Null
-
-Register-ObjectEvent `    -InputObject $watcher`
--EventName Changed `    -Action $action`
--SourceIdentifier "WorklogICS.Changed" |
-Out-Null
-
-Register-ObjectEvent `    -InputObject $watcher`
--EventName Renamed `    -Action $action`
--SourceIdentifier "WorklogICS.Renamed" |
-Out-Null
+Register-ObjectEvent $watcher "Created" -Action $action | Out-Null
+Register-ObjectEvent $watcher "Changed" -Action $action | Out-Null
+Register-ObjectEvent $watcher "Renamed" -Action $action | Out-Null
 
 # ============================================================
 
@@ -775,9 +798,8 @@ while ($true) {
         }
     }
 
-    # This is NOT polling for the file.
-    # It simply keeps the STA thread alive and allows
-    # PowerShell's FileSystemWatcher events to be processed.
+    # Keep the PowerShell STA thread alive so that
+    # FileSystemWatcher events continue to be processed.
     Start-Sleep -Milliseconds 500
 }
 ```
@@ -786,13 +808,12 @@ while ($true) {
 finally {
 
 ```
-Unregister-Event -SourceIdentifier "WorklogICS.Created" -ErrorAction SilentlyContinue
-Unregister-Event -SourceIdentifier "WorklogICS.Changed" -ErrorAction SilentlyContinue
-Unregister-Event -SourceIdentifier "WorklogICS.Renamed" -ErrorAction SilentlyContinue
-
-Get-Job |
-    Where-Object { $_.Name -like "WorklogICS*" } |
-    Remove-Job -Force -ErrorAction SilentlyContinue
+# Clean up all event subscriptions created by this script.
+Get-EventSubscriber |
+    Where-Object {
+        $_.SourceObject -eq $watcher
+    } |
+    Unregister-Event -Force -ErrorAction SilentlyContinue
 
 $watcher.EnableRaisingEvents = $false
 $watcher.Dispose()
