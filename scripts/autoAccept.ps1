@@ -29,6 +29,22 @@ if (-not (Test-Path $LocalFolder)) {
 $script:StartedOutlookByScript = $false
 
 # ============================================================
+# SAFE COM RELEASE HELPER
+# ============================================================
+
+function Release-ComObject {
+    param($ComObject)
+    if ($null -ne $ComObject) {
+        try {
+            if ([System.Runtime.InteropServices.Marshal]::IsComObject($ComObject)) {
+                [System.Runtime.InteropServices.Marshal]::ReleaseComObject($ComObject) | Out-Null
+            }
+        }
+        catch {}
+    }
+}
+
+# ============================================================
 # CONNECT TO OUTLOOK (BULLETPROOF COM INSTANTIATION)
 # ============================================================
 
@@ -41,14 +57,12 @@ function Connect-Outlook {
 
     for ($attempt = 1; $attempt -le $maxAttempts; $attempt++) {
         try {
-            # Check if Outlook process is already running
             $outlookProcess = Get-Process -Name "OUTLOOK" -ErrorAction SilentlyContinue
             
             if ($outlookProcess) {
                 try {
-                    $outlook = [Marshal]::GetActiveObject("Outlook.Application")
+                    $outlook = [System.Runtime.InteropServices.Marshal]::GetActiveObject("Outlook.Application")
                 } catch {
-                    # Fallback if Marshal fails while process exists
                     $outlook = New-Object -ComObject Outlook.Application
                 }
             } else {
@@ -56,11 +70,10 @@ function Connect-Outlook {
                 $script:StartedOutlookByScript = $true
             }
 
-            if ($null -ne $outlook -and $outlook -isnot [string]) {
-                # Test the COM object by pulling Namespace
+            if ($null -ne $outlook) {
                 $ns = $outlook.GetNamespace("MAPI")
                 if ($null -ne $ns) {
-                    [Runtime.InteropServices.Marshal]::ReleaseComObject($ns) | Out-Null
+                    Release-ComObject $ns
                     Write-Output "[OK] Connected to Outlook successfully."
                     break
                 }
@@ -170,7 +183,7 @@ function Find-ExistingWorklogEvent {
                 $item = $items.Item($index)
                 if ($null -eq $item) { continue }
                 if ($item.Class -ne 26) { 
-                    [Runtime.InteropServices.Marshal]::ReleaseComObject($item) | Out-Null
+                    Release-ComObject $item
                     continue 
                 }
 
@@ -180,7 +193,7 @@ function Find-ExistingWorklogEvent {
                     if ($null -ne $property -and $property.Value -eq $UID) { return $item }
                 }
                 finally {
-                    if ($property) { [Runtime.InteropServices.Marshal]::ReleaseComObject($property) | Out-Null }
+                    Release-ComObject $property
                 }
 
                 if ($item.Subject -eq $Summary) {
@@ -188,15 +201,15 @@ function Find-ExistingWorklogEvent {
                     if ($itemStart.Date -eq $Start.Date) { return $item }
                 }
                 
-                [Runtime.InteropServices.Marshal]::ReleaseComObject($item) | Out-Null
+                Release-ComObject $item
             }
             catch {
-                if ($item) { [Runtime.InteropServices.Marshal]::ReleaseComObject($item) | Out-Null }
+                Release-ComObject $item
             }
         }
     }
     finally {
-        if ($items) { [Runtime.InteropServices.Marshal]::ReleaseComObject($items) | Out-Null }
+        Release-ComObject $items
     }
     return $null
 }
@@ -276,8 +289,8 @@ function Invoke-ProcessIcs {
                 $uidProperty.Value = $uid
                 $appointment.Save()
 
-                [Runtime.InteropServices.Marshal]::ReleaseComObject($uidProperty) | Out-Null
-                [Runtime.InteropServices.Marshal]::ReleaseComObject($appointment) | Out-Null
+                Release-ComObject $uidProperty
+                Release-ComObject $appointment
                 
                 Write-Output " [CREATED]"
                 $createdCount++
@@ -318,14 +331,14 @@ function Invoke-ProcessIcs {
                     $uidProperty.Value = $uid
                     
                     $existing.Save()
-                    if ($uidProperty) { [Runtime.InteropServices.Marshal]::ReleaseComObject($uidProperty) | Out-Null }
-                    [Runtime.InteropServices.Marshal]::ReleaseComObject($existing) | Out-Null
+                    Release-ComObject $uidProperty
+                    Release-ComObject $existing
 
                     Write-Output " [UPDATED: $($changeReasons -join ', ')]"
                     $updatedCount++
                 }
                 else {
-                    [Runtime.InteropServices.Marshal]::ReleaseComObject($existing) | Out-Null
+                    Release-ComObject $existing
                     Write-Output " [SKIPPED - No Changes]"
                     $skippedCount++
                 }
@@ -343,9 +356,9 @@ function Invoke-ProcessIcs {
         Write-Output "========================================"
     }
     finally {
-        if ($calendar) { [Runtime.InteropServices.Marshal]::ReleaseComObject($calendar) | Out-Null }
-        if ($namespace) { [Runtime.InteropServices.Marshal]::ReleaseComObject($namespace) | Out-Null }
-        if ($outlook -and $outlook -isnot [string]) { [Runtime.InteropServices.Marshal]::ReleaseComObject($outlook) | Out-Null }
+        Release-ComObject $calendar
+        Release-ComObject $namespace
+        Release-ComObject $outlook
 
         [GC]::Collect()
         [GC]::WaitForPendingFinalizers()
