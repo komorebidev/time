@@ -4,9 +4,9 @@
 
 $ErrorActionPreference = "Stop"
 
-# Force UTF-8 encoding for console display to avoid mojibake
+# Force UTF-8 encoding for console output and standard streams
 [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
-$PSDefaultParameterValues['Out-File:Encoding'] = 'utf8'
+$OutputEncoding = [System.Text.Encoding]::UTF8
 
 # ============================================================
 # CONFIGURATION
@@ -27,8 +27,8 @@ $script:StartedOutlookByScript = $false
 # ============================================================
 
 function Connect-Outlook {
-    Write-Host ""
-    Write-Host "Connecting to Outlook via background COM..."
+    Write-Output ""
+    Write-Output "Connecting to Outlook via background COM..."
 
     $outlook = $null
     $maxAttempts = 10
@@ -39,7 +39,7 @@ function Connect-Outlook {
             if ($null -eq $outlook) {
                 throw "No active instance found."
             }
-            Write-Host "[OK] Connected to active Outlook instance"
+            Write-Output "[OK] Connected to active Outlook instance"
             break
         }
         catch {
@@ -47,11 +47,11 @@ function Connect-Outlook {
                 $outlookType = [Type]::GetTypeFromProgID("Outlook.Application")
                 $outlook = [Activator]::CreateInstance($outlookType)
                 $script:StartedOutlookByScript = $true
-                Write-Host "[OK] Created background Outlook COM instance"
+                Write-Output "[OK] Created background Outlook COM instance"
                 break
             }
             catch {
-                Write-Host "Attempt $attempt of $maxAttempts failed to bind Outlook COM. Retrying..."
+                Write-Output "Attempt $attempt of $maxAttempts failed to bind Outlook COM. Retrying..."
                 if ($attempt -eq $maxAttempts) {
                     throw "Failed to initialize Outlook COM interface: $_"
                 }
@@ -100,35 +100,23 @@ function Parse-IcsDate {
 }
 
 # ============================================================
-# READ ICS EVENTS (Handles UTF-8 and Shift-JIS automatically)
+# READ ICS EVENTS (Robust UTF-8 with BOM & Fallback Handling)
 # ============================================================
 
 function Read-IcsEvents {
     param([string]$Path)
     
-    # Read bytes first to check for BOM or fallback safely
     $bytes = [System.IO.File]::ReadAllBytes($Path)
-    $encoding = [System.Text.Encoding]::UTF8
-    
-    if ($bytes.Length -ge 3 -and $bytes[0] -eq 0xEF -and $bytes[1] -eq 0xBB -and $bytes[2] -eq 0xBF) {
-        $encoding = [System.Text.Encoding]::UTF8
-    } else {
-        # Test if valid UTF-8 string, otherwise fallback to system default (Shift-JIS for Japanese Windows)
-        try {
-            $utf8String = [System.Text.Encoding]::UTF8.GetString($bytes)
-            # Simple heuristic or default fallback
-            $encoding = [System.Text.Encoding]::UTF8
-        } catch {
-            $encoding = [System.Text.Encoding]::Default
-        }
-    }
+    $raw = ""
 
-    $raw = [System.Text.Encoding]::UTF8.GetString($bytes)
-    # If standard text read fails or has invalid chars, fallback to Default
-    try {
-        $raw = $encoding.GetString($bytes)
-    } catch {
-        $raw = [System.IO.File]::ReadAllText($Path, [System.Text.Encoding]::Default)
+    if ($bytes.Length -ge 3 -and $bytes[0] -eq 0xEF -and $bytes[1] -eq 0xBB -and $bytes[2] -eq 0xBF) {
+        $raw = [System.Text.Encoding]::UTF8.GetString($bytes, 3, $bytes.Length - 3)
+    } else {
+        try {
+            $raw = [System.Text.Encoding]::UTF8.GetString($bytes)
+        } catch {
+            $raw = [System.IO.File]::ReadAllText($Path, [System.Text.Encoding]::Default)
+        }
     }
 
     $raw = $raw -replace "`r`n", "`n" -replace "`r", "`n" -replace "`n[ `t]", ""
@@ -143,8 +131,7 @@ function Read-IcsEvents {
         if ($null -eq $current) { continue }
 
         $parts = $line -split ":", 2
-        $partsCount = $parts.Count
-        if ($partsCount -ne 2) { continue }
+        if ($parts.Count -ne 2) { continue }
 
         $propertyName = ($parts[0] -split ";")[0].ToUpper()
         $current.Properties[$propertyName] = $parts[1]
@@ -208,10 +195,9 @@ function Invoke-ProcessIcs {
     $skippedCount = 0
 
     try {
-        Write-Host ""
-        Write-Host "[DETECTED] Processing local ICS file..." -ForegroundColor Cyan
+        Write-Output ""
+        Write-Output "[DETECTED] Processing local ICS file..."
 
-        # Brief pause to ensure OneDrive has fully released the sync write lock
         Start-Sleep -Seconds 3
 
         $outlook = Connect-Outlook
@@ -220,8 +206,8 @@ function Invoke-ProcessIcs {
 
         $events = Read-IcsEvents -Path $FilePath
 
-        Write-Host ""
-        Write-Host "Processing ICS events..."
+        Write-Output ""
+        Write-Output "Processing ICS events..."
 
         foreach ($icsEvent in $events) {
             $properties = $icsEvent.Properties
@@ -233,7 +219,6 @@ function Invoke-ProcessIcs {
             $location = Unescape-IcsText($properties["LOCATION"])
             $transp = $properties["TRANSP"]
 
-            # Determine BusyStatus: Out of Office = 3, Transparent (Free) = 0, Regular Busy = 2
             $targetBusyStatus = 2
             if ($summary -eq "Out of Office") {
                 $targetBusyStatus = 3
@@ -246,12 +231,12 @@ function Invoke-ProcessIcs {
                 $end = Parse-IcsDate($properties["DTEND"])
             }
             catch {
-                Write-Host "  [SKIP] Invalid date format for event: $summary" -ForegroundColor Yellow
+                Write-Output "  [SKIP] Invalid date format for event: $summary"
                 $skippedCount++
                 continue
             }
 
-            Write-Host "  -> Processing: '$summary' ($($start.ToString('yyyy-MM-dd')))..." -NoNewline
+            Write-Output "  -> Processing: '$summary' ($($start.ToString('yyyy-MM-dd')))..."
 
             $existing = Find-ExistingWorklogEvent -Calendar $calendar -UID $uid -Summary $summary -Start $start
 
@@ -272,7 +257,7 @@ function Invoke-ProcessIcs {
                 [Runtime.InteropServices.Marshal]::ReleaseComObject($uidProperty) | Out-Null
                 [Runtime.InteropServices.Marshal]::ReleaseComObject($appointment) | Out-Null
                 
-                Write-Host " [CREATED]" -ForegroundColor Green
+                Write-Output " [CREATED]"
                 $createdCount++
             }
             else {
@@ -314,27 +299,26 @@ function Invoke-ProcessIcs {
                     if ($uidProperty) { [Runtime.InteropServices.Marshal]::ReleaseComObject($uidProperty) | Out-Null }
                     [Runtime.InteropServices.Marshal]::ReleaseComObject($existing) | Out-Null
 
-                    Write-Host " [UPDATED: $($changeReasons -join ', ')]" -ForegroundColor Cyan
+                    Write-Output " [UPDATED: $($changeReasons -join ', ')]"
                     $updatedCount++
                 }
                 else {
                     [Runtime.InteropServices.Marshal]::ReleaseComObject($existing) | Out-Null
-                    Write-Host " [SKIPPED - No Changes]" -ForegroundColor DarkGray
+                    Write-Output " [SKIPPED - No Changes]"
                     $skippedCount++
                 }
             }
         }
 
-        # Delete local ICS file after successful processing
         Remove-Item $FilePath -Force -ErrorAction SilentlyContinue
-        Write-Host "[OK] Local ICS file processed and cleaned up." -ForegroundColor Green
+        Write-Output "[OK] Local ICS file processed and cleaned up."
     }
     catch {
-        Write-Host ""
-        Write-Host "========================================"
-        Write-Host "ERROR ENCOUNTERED:" -ForegroundColor Red
-        Write-Host $_ -ForegroundColor Red
-        Write-Host "========================================"
+        Write-Output ""
+        Write-Output "========================================"
+        Write-Output "ERROR ENCOUNTERED:"
+        Write-Output $_
+        Write-Output "========================================"
     }
     finally {
         if ($calendar) { [Runtime.InteropServices.Marshal]::ReleaseComObject($calendar) | Out-Null }
@@ -348,10 +332,10 @@ function Invoke-ProcessIcs {
             Stop-Process -Name OUTLOOK -Force -ErrorAction SilentlyContinue
         }
 
-        Write-Host ""
-        Write-Host "========================================"
-        Write-Host "FINISHED. Created: $createdCount | Updated: $updatedCount | Skipped: $skippedCount"
-        Write-Host "========================================"
+        Write-Output ""
+        Write-Output "========================================"
+        Write-Output "FINISHED. Created: $createdCount | Updated: $updatedCount | Skipped: $skippedCount"
+        Write-Output "========================================"
     }
 }
 
@@ -365,17 +349,16 @@ $watcher.Filter = $Filter
 $watcher.IncludeSubdirectories = $false
 $watcher.EnableRaisingEvents = $true
 
-Write-Host ""
-Write-Host "========================================"
-Write-Host "BACKGROUND ICS WATCHER ACTIVE"
-Write-Host "Watching: $LocalFolder"
-Write-Host "========================================"
-Write-Host "Keep this window minimized to run in background."
+Write-Output ""
+Write-Output "========================================"
+Write-Output "BACKGROUND ICS WATCHER ACTIVE"
+Write-Output "Watching: $LocalFolder"
+Write-Output "========================================"
+Write-Output "Keep this window minimized to run in background."
 
 $action = {
     $path = $Event.SourceEventArgs.FullPath
     
-    # Verify file is unlocked and fully synced
     $success = $false
     for ($i = 1; $i -le 5; $i++) {
         try {
@@ -399,9 +382,8 @@ $action = {
 Register-ObjectEvent $watcher "Created" -Action $action | Out-Null
 Register-ObjectEvent $watcher "Changed" -Action $action | Out-Null
 
-# Catch any file already sitting in the folder upon startup
 if (Test-Path $TargetIcsFile) {
-    Write-Host "[INFO] Existing file detected on startup. Processing..." -ForegroundColor Yellow
+    Write-Output "[INFO] Existing file detected on startup. Processing..."
     Invoke-ProcessIcs -FilePath $TargetIcsFile
 }
 
