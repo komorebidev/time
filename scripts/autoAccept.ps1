@@ -1,8 +1,12 @@
 # ============================================================
-# Worklog ICS -> Outlook Calendar (Local OneDrive Watcher / Pure COM)
+# Worklog ICS -> Outlook Calendar (OneDrive Watcher / Pure COM)
 # ============================================================
 
 $ErrorActionPreference = "Stop"
+
+# Force UTF-8 encoding for console display to avoid mojibake
+[Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+$PSDefaultParameterValues['Out-File:Encoding'] = 'utf8'
 
 # ============================================================
 # CONFIGURATION
@@ -96,12 +100,37 @@ function Parse-IcsDate {
 }
 
 # ============================================================
-# READ ICS EVENTS (Fixed encoding for Japanese/Shift-JIS)
+# READ ICS EVENTS (Handles UTF-8 and Shift-JIS automatically)
 # ============================================================
 
 function Read-IcsEvents {
     param([string]$Path)
-    $raw = [System.IO.File]::ReadAllText($Path, [System.Text.Encoding]::Default)
+    
+    # Read bytes first to check for BOM or fallback safely
+    $bytes = [System.IO.File]::ReadAllBytes($Path)
+    $encoding = [System.Text.Encoding]::UTF8
+    
+    if ($bytes.Length -ge 3 -and $bytes[0] -eq 0xEF -and $bytes[1] -eq 0xBB -and $bytes[2] -eq 0xBF) {
+        $encoding = [System.Text.Encoding]::UTF8
+    } else {
+        # Test if valid UTF-8 string, otherwise fallback to system default (Shift-JIS for Japanese Windows)
+        try {
+            $utf8String = [System.Text.Encoding]::UTF8.GetString($bytes)
+            # Simple heuristic or default fallback
+            $encoding = [System.Text.Encoding]::UTF8
+        } catch {
+            $encoding = [System.Text.Encoding]::Default
+        }
+    }
+
+    $raw = [System.Text.Encoding]::UTF8.GetString($bytes)
+    # If standard text read fails or has invalid chars, fallback to Default
+    try {
+        $raw = $encoding.GetString($bytes)
+    } catch {
+        $raw = [System.IO.File]::ReadAllText($Path, [System.Text.Encoding]::Default)
+    }
+
     $raw = $raw -replace "`r`n", "`n" -replace "`r", "`n" -replace "`n[ `t]", ""
     $lines = $raw -split "`n"
     $events = @()
@@ -168,6 +197,8 @@ function Find-ExistingWorklogEvent {
 
 function Invoke-ProcessIcs {
     param([string]$FilePath)
+
+    if (-not (Test-Path $FilePath)) { return }
 
     $outlook = $null
     $namespace = $null
@@ -348,11 +379,13 @@ $action = {
     $success = $false
     for ($i = 1; $i -le 5; $i++) {
         try {
-            $stream = [System.IO.File]::Open($path, 'Open', 'Read', 'None')
-            $stream.Close()
-            $stream.Dispose()
-            $success = $true
-            break
+            if (Test-Path $path) {
+                $stream = [System.IO.File]::Open($path, 'Open', 'Read', 'None')
+                $stream.Close()
+                $stream.Dispose()
+                $success = $true
+                break
+            }
         } catch {
             Start-Sleep -Seconds 2
         }
@@ -365,6 +398,12 @@ $action = {
 
 Register-ObjectEvent $watcher "Created" -Action $action | Out-Null
 Register-ObjectEvent $watcher "Changed" -Action $action | Out-Null
+
+# Catch any file already sitting in the folder upon startup
+if (Test-Path $TargetIcsFile) {
+    Write-Host "[INFO] Existing file detected on startup. Processing..." -ForegroundColor Yellow
+    Invoke-ProcessIcs -FilePath $TargetIcsFile
+}
 
 try {
     while ($true) { Start-Sleep -Seconds 1 }
