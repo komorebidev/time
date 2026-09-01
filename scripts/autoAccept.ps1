@@ -65,20 +65,24 @@ if ($null -ne $ComObject) {
 # ============================================================
 
 function Connect-Outlook {
-Write-Host "Connecting to Outlook via COM..."
 
 ```
+Write-Host "Connecting to Outlook via COM..."
+
 $outlook = $null
 $maxAttempts = 10
 
 for ($attempt = 1; $attempt -le $maxAttempts; $attempt++) {
+
     try {
+
         $outlook = $null
 
         try {
             $outlook = [System.Runtime.InteropServices.Marshal]::GetActiveObject("Outlook.Application")
         }
         catch {
+
             $outlook = New-Object -ComObject Outlook.Application
 
             if ($null -eq (Get-Process -Name "OUTLOOK" -ErrorAction SilentlyContinue)) {
@@ -87,16 +91,15 @@ for ($attempt = 1; $attempt -le $maxAttempts; $attempt++) {
         }
 
         if ($null -ne $outlook) {
+
             $ns = $null
 
             try {
+
                 $ns = $outlook.GetNamespace("MAPI")
 
                 if ($null -ne $ns) {
                     Write-Host "[OK] Connected to Outlook successfully."
-
-                    # IMPORTANT:
-                    # Only return the Outlook COM object.
                     return $outlook
                 }
             }
@@ -106,6 +109,7 @@ for ($attempt = 1; $attempt -le $maxAttempts; $attempt++) {
         }
     }
     catch {
+
         Write-Host "Attempt $attempt of $maxAttempts failed to bind Outlook COM: $_"
     }
 
@@ -167,6 +171,7 @@ if ($Value -match '^(\d{4})(\d{2})(\d{2})$') {
 }
 
 if ($Value -match '^(\d{4})(\d{2})(\d{2})T(\d{2})(\d{2})(\d{2})Z$') {
+
     $dt = [datetime]::ParseExact(
         $Value,
         "yyyyMMddTHHmmssZ",
@@ -178,6 +183,7 @@ if ($Value -match '^(\d{4})(\d{2})(\d{2})T(\d{2})(\d{2})(\d{2})Z$') {
 }
 
 if ($Value -match '^(\d{4})(\d{2})(\d{2})T(\d{2})(\d{2})(\d{2})$') {
+
     return [datetime]::ParseExact(
         $Value,
         "yyyyMMddTHHmmss",
@@ -209,6 +215,7 @@ if (
     $bytes[1] -eq 0xBB -and
     $bytes[2] -eq 0xBF
 ) {
+
     $raw = [System.Text.Encoding]::UTF8.GetString(
         $bytes,
         3,
@@ -216,10 +223,12 @@ if (
     )
 }
 else {
+
     try {
         $raw = [System.Text.Encoding]::UTF8.GetString($bytes)
     }
     catch {
+
         $raw = [System.IO.File]::ReadAllText(
             $Path,
             [System.Text.Encoding]::Default
@@ -227,7 +236,6 @@ else {
     }
 }
 
-# Normalize line endings
 $raw = $raw -replace "`r`n", "`n"
 $raw = $raw -replace "`r", "`n"
 
@@ -327,10 +335,7 @@ try {
 
                 $property = $item.UserProperties.Find("WorklogUID")
 
-                if (
-                    $null -ne $property -and
-                    $property.Value -eq $UID
-                ) {
+                if ($null -ne $property -and $property.Value -eq $UID) {
                     return $item
                 }
             }
@@ -392,12 +397,11 @@ try {
     Write-Output ""
     Write-Output "[DETECTED] Processing local ICS file..."
 
-    # Give OneDrive a moment to finish writing/syncing.
     Start-Sleep -Seconds 2
 
-    # ====================================================
-    # WAIT UNTIL FILE IS AVAILABLE
-    # ====================================================
+    # ----------------------------------------------------
+    # Wait for OneDrive/file writer to release the file
+    # ----------------------------------------------------
 
     $fileReady = $false
 
@@ -437,18 +441,18 @@ try {
         return
     }
 
-    # ====================================================
-    # CONNECT TO OUTLOOK
-    # ====================================================
+    # ----------------------------------------------------
+    # Outlook
+    # ----------------------------------------------------
 
     $outlook = Connect-Outlook
 
     $namespace = $outlook.GetNamespace("MAPI")
     $calendar = $namespace.GetDefaultFolder(9)
 
-    # ====================================================
-    # READ ICS
-    # ====================================================
+    # ----------------------------------------------------
+    # Read ICS
+    # ----------------------------------------------------
 
     $events = Read-IcsEvents -Path $FilePath
 
@@ -461,7 +465,6 @@ try {
         $uid = $properties["UID"]
 
         if ([string]::IsNullOrWhiteSpace($uid)) {
-
             $skippedCount++
             continue
         }
@@ -480,9 +483,9 @@ try {
             $targetBusyStatus = 0
         }
 
-        # =================================================
-        # PARSE DATES
-        # =================================================
+        # ------------------------------------------------
+        # Dates
+        # ------------------------------------------------
 
         try {
 
@@ -499,9 +502,9 @@ try {
 
         Write-Output "  -> Processing: '$summary' ($($start.ToString('yyyy-MM-dd')))..."
 
-        # =================================================
-        # FIND EXISTING EVENT
-        # =================================================
+        # ------------------------------------------------
+        # Find existing
+        # ------------------------------------------------
 
         $existing = Find-ExistingWorklogEvent `
             -Calendar $calendar `
@@ -509,9 +512,9 @@ try {
             -Summary $summary `
             -Start $start
 
-        # =================================================
-        # CREATE
-        # =================================================
+        # ------------------------------------------------
+        # Create
+        # ------------------------------------------------
 
         if ($null -eq $existing) {
 
@@ -543,43 +546,35 @@ try {
             $createdCount++
         }
 
-        # =================================================
-        # UPDATE
-        # =================================================
+        # ------------------------------------------------
+        # Update
+        # ------------------------------------------------
 
         else {
 
-            $normExistingBody =
-                if ($null -eq $existing.Body) {
-                    ""
-                }
-                else {
-                    "$($existing.Body)".Replace("`r`n", "`n").Trim()
-                }
+            $normExistingBody = ""
 
-            $normNewBody =
-                if ($null -eq $description) {
-                    ""
-                }
-                else {
-                    "$description".Replace("`r`n", "`n").Trim()
-                }
+            if ($null -ne $existing.Body) {
+                $normExistingBody = "$($existing.Body)".Replace("`r`n", "`n").Trim()
+            }
 
-            $normExistingLoc =
-                if ($null -eq $existing.Location) {
-                    ""
-                }
-                else {
-                    "$($existing.Location)".Trim()
-                }
+            $normNewBody = ""
 
-            $normNewLoc =
-                if ($null -eq $location) {
-                    ""
-                }
-                else {
-                    "$location".Trim()
-                }
+            if ($null -ne $description) {
+                $normNewBody = "$description".Replace("`r`n", "`n").Trim()
+            }
+
+            $normExistingLoc = ""
+
+            if ($null -ne $existing.Location) {
+                $normExistingLoc = "$($existing.Location)".Trim()
+            }
+
+            $normNewLoc = ""
+
+            if ($null -ne $location) {
+                $normNewLoc = "$location".Trim()
+            }
 
             $existingStart = [datetime]$existing.Start
             $existingEnd = [datetime]$existing.End
@@ -655,9 +650,9 @@ try {
         }
     }
 
-    # ====================================================
-    # REMOVE PROCESSED FILE
-    # ====================================================
+    # ----------------------------------------------------
+    # Delete processed file
+    # ----------------------------------------------------
 
     Remove-Item $FilePath -Force -ErrorAction SilentlyContinue
 
@@ -682,10 +677,7 @@ finally {
 
     if ($script:StartedOutlookByScript) {
 
-        Stop-Process `
-            -Name OUTLOOK `
-            -Force `
-            -ErrorAction SilentlyContinue
+        Stop-Process -Name OUTLOOK -Force -ErrorAction SilentlyContinue
 
         $script:StartedOutlookByScript = $false
     }
@@ -701,7 +693,7 @@ finally {
 
 # ============================================================
 
-# FILE SYSTEM WATCHER SETUP
+# FILE SYSTEM WATCHER
 
 # ============================================================
 
@@ -730,7 +722,7 @@ Write-Output "Keep this window minimized to run in background."
 
 # ============================================================
 
-# FILE SYSTEM EVENT ACTION
+# EVENT ACTION
 
 # ============================================================
 
@@ -743,8 +735,6 @@ if ($path -ieq $TargetIcsFile) {
 
     Write-Host "[EVENT] ICS file change detected: $path"
 
-    # Do not touch Outlook from the event handler.
-    # Set a flag and let the main STA thread process it.
     $script:ProcessTriggered = $true
 }
 ```
@@ -779,7 +769,7 @@ Invoke-ProcessIcs -FilePath $TargetIcsFile
 
 # ============================================================
 
-# MAIN STA LOOP
+# MAIN LOOP
 
 # ============================================================
 
@@ -793,13 +783,10 @@ while ($true) {
         $script:ProcessTriggered = $false
 
         if (Test-Path $TargetIcsFile) {
-
             Invoke-ProcessIcs -FilePath $TargetIcsFile
         }
     }
 
-    # Keep the PowerShell STA thread alive so that
-    # FileSystemWatcher events continue to be processed.
     Start-Sleep -Milliseconds 500
 }
 ```
@@ -808,7 +795,6 @@ while ($true) {
 finally {
 
 ```
-# Clean up all event subscriptions created by this script.
 Get-EventSubscriber |
     Where-Object {
         $_.SourceObject -eq $watcher
