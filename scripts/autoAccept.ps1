@@ -62,14 +62,15 @@ function Parse-IcsDate {
         return ([datetime]::ParseExact($Value, "yyyyMMddTHHmmssZ", [Globalization.CultureInfo]::InvariantCulture, [Globalization.DateTimeStyles]::AssumeUniversal)).ToLocalTime()
     }
     if ($Value -match '^(\d{4})(\d{2})(\d{2})T(\d{2})(\d{2})(\d{2})$') {
-        return [datetime]::ParseExact($Value, "yyyyMMddTHHmmss", [Globalization.CultureInfo]::InvariantCulture)
+        return ([datetime]::ParseExact($Value, "yyyyMMddTHHmmss", [Globalization.CultureInfo]::InvariantCulture)
     }
     throw "Unsupported ICS date format: $Value"
 }
 
 function Read-IcsEvents {
     param([string]$Path)
-    $raw = [System.IO.File]::ReadAllText($Path, [System.Text.Encoding]::UTF8)
+    # Using System.Text.Encoding.Default to match local ANSI/Shift-JIS encoding and prevent garbled text
+    $raw = [System.IO.File]::ReadAllText($Path, [System.Text.Encoding]::Default)
     $raw = $raw -replace "`r`n", "`n" -replace "`r", "`n" -replace "`n[ `t]", ""
     $lines = $raw -split "`n"
     $events = @()
