@@ -7,45 +7,33 @@ async page => {
         'input[name="actioncompletiondate_time"]'
     );
 
-    // Set Start
+    // Set both times
     await start.fill("08:00");
-
-    const afterStart = await start.inputValue();
-
-    // Set End
     await end.fill("09:00");
 
-    const afterEnd = await start.inputValue();
+    const beforeSave = {
+        start: await start.inputValue(),
+        end: await end.inputValue()
+    };
 
-    // Open Charge Type
-    const chargeCombobox = page.getByRole(
-        "combobox",
-        { name: "Charge Type *" }
+    // Find the actual visible Save button
+    const saveButton = page.getByRole(
+        "button",
+        { name: "Save", exact: true }
     );
 
-    await chargeCombobox.click();
+    await saveButton.waitFor({
+        state: "visible",
+        timeout: 10000
+    });
 
-    await page.waitForTimeout(500);
+    // Use Playwright's normal click
+    await saveButton.click();
 
-    // Select Internal Work
-    const chargeOption = page.locator(
-        '.Select__option',
-        { hasText: "Internal Work" }
-    ).last();
-
-    await chargeOption.click();
-
-    await page.waitForTimeout(1000);
-
-    const afterCharge = await page
-        .locator(
-            'input[name="actionarrivaldate_time"]'
-        )
-        .inputValue();
+    await page.waitForTimeout(2000);
 
     return {
-        afterStart,
-        afterEnd,
-        afterCharge
+        beforeSave,
+        urlAfterSave: page.url()
     };
 }
