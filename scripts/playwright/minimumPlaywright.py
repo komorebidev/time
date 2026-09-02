@@ -1,27 +1,14 @@
 import os
 import sys
-import atexit
 import platform
-import re
 import shutil
-import stat
 import subprocess
 import tempfile
 import time
+import re
 
-
-# ============================================================
-# CONFIGURATION
-# ============================================================
 
 BASE_URL = "https://support.eiresystems.com/ticket"
-
-ASSIGNED_TICKETS_URL = (
-    "https://support.eiresystems.com/tickets"
-    "?area=1&mainview=team&viewid=2&selid=75"
-    "&sellevel=2&selparentid=engineers%20tky"
-)
-
 SESSION = "halo"
 
 
@@ -30,7 +17,6 @@ SESSION = "halo"
 # ============================================================
 
 def find_playwright_cli():
-
     cli = shutil.which("playwright-cli")
 
     if cli:
@@ -67,22 +53,22 @@ def run_cli(*args, check=True):
 
             quoted_args.append(s)
 
-        cmd_str = (
+        cmd = (
             f'"{CLI}" "--s={SESSION}" '
             + " ".join(quoted_args)
         )
 
         print()
-        print("> " + cmd_str)
+        print("> " + cmd)
 
         result = subprocess.run(
-            cmd_str,
+            cmd,
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
             text=True,
             encoding="utf-8",
             errors="replace",
-            shell=True,
+            shell=True
         )
 
     else:
@@ -90,7 +76,7 @@ def run_cli(*args, check=True):
         command = [
             CLI,
             f"--s={SESSION}",
-            *[str(arg) for arg in args]
+            *[str(x) for x in args]
         ]
 
         print()
@@ -103,106 +89,23 @@ def run_cli(*args, check=True):
             text=True,
             encoding="utf-8",
             errors="replace",
-            shell=False,
+            shell=False
         )
 
     if result.stdout:
         print(result.stdout)
 
     if check and result.returncode != 0:
-
         raise RuntimeError(
-            "Playwright CLI command failed "
-            f"with exit code {result.returncode}"
+            f"Playwright CLI failed with exit code "
+            f"{result.returncode}"
         )
 
     return result.stdout
 
 
 # ============================================================
-# CLEANUP
-# ============================================================
-
-def remove_readonly(func, path, excinfo):
-
-    os.chmod(
-        path,
-        stat.S_IWRITE
-    )
-
-    func(path)
-
-
-def cleanup_local_artifacts():
-
-    folders_to_remove = [
-        ".playwright",
-        ".playwright-cli"
-    ]
-
-    for folder in folders_to_remove:
-
-        if (
-            os.path.exists(folder)
-            and os.path.isdir(folder)
-        ):
-
-            for attempt in range(3):
-
-                try:
-
-                    shutil.rmtree(
-                        folder,
-                        onerror=remove_readonly
-                    )
-
-                    print(
-                        f"Cleaned up local folder: {folder}"
-                    )
-
-                    break
-
-                except Exception as e:
-
-                    if attempt == 2:
-
-                        print(
-                            f"Note: Could not fully remove "
-                            f"folder {folder}: {e}"
-                        )
-
-                    else:
-
-                        time.sleep(0.5)
-
-
-atexit.register(
-    cleanup_local_artifacts
-)
-
-
-# ============================================================
-# EDGE ATTACH
-# ============================================================
-
-def attach():
-
-    print()
-    print("========================================")
-    print("ATTACHING TO EDGE")
-    print("========================================")
-
-    run_cli(
-        "attach",
-        "--extension=msedge",
-        check=True
-    )
-
-    time.sleep(1)
-
-
-# ============================================================
-# NAVIGATE TO TICKET
+# NAVIGATION
 # ============================================================
 
 def goto_ticket(ticket):
@@ -214,9 +117,7 @@ def goto_ticket(ticket):
     )
 
     print()
-    print(
-        f"Opening ticket {ticket}..."
-    )
+    print(f"Opening ticket {ticket}...")
 
     run_cli(
         "goto",
@@ -228,68 +129,76 @@ def goto_ticket(ticket):
 
 
 # ============================================================
-# MINIMAL WORKLOG TEST
+# TIME VALIDATION
 # ============================================================
 
-def run_time_test(start_time, end_time):
+def validate_time(value):
 
-    """
-    IMPORTANT:
+    value = value.strip()
 
-    This test intentionally does ONLY:
+    # Correct HH:MM validation.
+    # Allows 00:00 through 23:59.
 
-        1. Open Worklog
-        2. Find Job Start
-        3. Click Job Start
-        4. Fill Job Start
-        5. Find Job End
-        6. Click Job End
-        7. Fill Job End
-        8. Verify both values
-        9. Save
+    if not re.fullmatch(
+        r"(?:[01]\d|2[0-3]):[0-5]\d",
+        value
+    ):
+        raise ValueError(
+            f"Invalid time '{value}'. "
+            "Use HH:MM, e.g. 08:00"
+        )
 
-    It does NOT touch:
+    return value
 
-        - Worklog editor
-        - Status
-        - Charge Type
 
-    This lets us compare the Python-generated run-code
-    against the exact live test that previously worked.
-    """
+# ============================================================
+# TEST
+# ============================================================
+
+def run_test(ticket, requested_start, requested_end):
+
+    requested_start = validate_time(requested_start)
+    requested_end = validate_time(requested_end)
 
     js_code = f"""
 async page => {{
 
     console.log("");
     console.log("========================================");
-    console.log("MINIMAL HALO TIME TEST");
+    console.log("HALO JOB START DIAGNOSTIC");
     console.log("========================================");
 
 
     // ========================================================
-    // STEP 1 - OPEN WORKLOG
+    // OPEN WORKLOG
     // ========================================================
 
     console.log("");
-    console.log("STEP 1: Opening Worklog");
+    console.log("1. Opening Worklog...");
 
-    await page.getByRole(
+    const worklogButton = page.getByRole(
         "button",
         {{
             name: "Worklog"
         }}
-    ).click();
+    );
+
+    await worklogButton.waitFor({{
+        state: "visible",
+        timeout: 10000
+    }});
+
+    await worklogButton.click();
 
     await page.waitForTimeout(1500);
 
 
     // ========================================================
-    // STEP 2 - LOCATE INPUTS
+    // LOCATE ACTUAL TIME INPUTS
     // ========================================================
 
     console.log("");
-    console.log("STEP 2: Locating time inputs");
+    console.log("2. Locating actual Halo time inputs...");
 
 
     const start = page.locator(
@@ -299,17 +208,6 @@ async page => {{
     const end = page.locator(
         'input[name="actioncompletiondate_time"]'
     );
-
-
-    await start.waitFor({{
-        state: "visible",
-        timeout: 10000
-    }});
-
-    await end.waitFor({{
-        state: "visible",
-        timeout: 10000
-    }});
 
 
     console.log(
@@ -322,24 +220,44 @@ async page => {{
         await end.count()
     );
 
-    console.log(
-        "Start visible:",
-        await start.isVisible()
-    );
+
+    if (await start.count() !== 1) {{
+        throw new Error(
+            "Expected exactly one Job Start input."
+        );
+    }}
+
+    if (await end.count() !== 1) {{
+        throw new Error(
+            "Expected exactly one Job End input."
+        );
+    }}
+
+
+    // ========================================================
+    // INSPECT START FIELD
+    // ========================================================
+
+    console.log("");
+    console.log("3. Inspecting Job Start field...");
+
+
+    const startInfo = await start.evaluate(el => ({{
+        id: el.id,
+        name: el.getAttribute("name"),
+        type: el.getAttribute("type"),
+        value: el.value,
+        disabled: el.disabled,
+        readOnly: el.readOnly,
+        visible:
+            !!(el.offsetWidth || el.offsetHeight),
+        outerHTML: el.outerHTML
+    }}));
+
 
     console.log(
-        "End visible:",
-        await end.isVisible()
-    );
-
-    console.log(
-        "Start enabled:",
-        await start.isEnabled()
-    );
-
-    console.log(
-        "End enabled:",
-        await end.isEnabled()
+        "START INFO:",
+        JSON.stringify(startInfo)
     );
 
 
@@ -355,165 +273,206 @@ async page => {{
 
 
     console.log("");
+    console.log("4. Initial values:");
+
     console.log(
-        "INITIAL START:",
+        "Job Start:",
         initialStart
     );
 
     console.log(
-        "INITIAL END:",
+        "Job End:",
         initialEnd
     );
 
 
     // ========================================================
-    // STEP 3 - START
+    // CLICK START
     // ========================================================
 
     console.log("");
-    console.log("========================================");
-    console.log("STEP 3: SETTING JOB START");
-    console.log("========================================");
-
-    console.log(
-        "Requested Start:",
-        {start_time!r}
-    );
-
-
-    console.log(
-        "Start before click:",
-        await start.inputValue()
-    );
+    console.log("5. CLICKING JOB START...");
 
 
     await start.scrollIntoViewIfNeeded();
 
-    console.log(
-        "Start scrolled into view."
-    );
-
-
     await start.click();
 
+
+    const focusInfo = await start.evaluate(el => ({{
+        active:
+            document.activeElement === el,
+
+        activeId:
+            document.activeElement?.id || null,
+
+        activeName:
+            document.activeElement?.getAttribute("name") || null,
+
+        activeType:
+            document.activeElement?.getAttribute("type") || null
+    }}));
+
+
     console.log(
-        "Start CLICK completed."
+        "FOCUS AFTER CLICK:",
+        JSON.stringify(focusInfo)
     );
 
 
-    const startFocused =
-        await start.evaluate(
-            el => document.activeElement === el
+    if (!focusInfo.active) {{
+        console.log(
+            "WARNING: Job Start did not become "
+            "document.activeElement."
         );
+    }} else {{
+        console.log(
+            "SUCCESS: Job Start is focused."
+        );
+    }}
 
 
+    // ========================================================
+    // FILL START
+    // ========================================================
+
+    console.log("");
     console.log(
-        "Start focused:",
-        startFocused
-    );
-
-
-    console.log(
-        "Start before fill:",
-        await start.inputValue()
+        "6. FILLING JOB START:",
+        {requested_start!r}
     );
 
 
     await start.fill(
-        {start_time!r}
+        {requested_start!r}
     );
+
+
+    const afterFill =
+        await start.inputValue();
 
 
     console.log(
-        "Start immediately after fill:",
-        await start.inputValue()
+        "VALUE IMMEDIATELY AFTER FILL:",
+        afterFill
     );
 
 
-    await page.waitForTimeout(100);
+    // ========================================================
+    // VERIFY DOM VALUE
+    // ========================================================
+
+    if (afterFill !== {requested_start!r}) {{
+        throw new Error(
+            "Job Start did not contain the requested "
+            "value immediately after fill. " +
+            "Expected " + {requested_start!r} +
+            " but got " + afterFill
+        );
+    }}
 
 
+    // ========================================================
+    // WAIT
+    // ========================================================
+
+    console.log("");
     console.log(
-        "Start after 100ms:",
-        await start.inputValue()
+        "7. Waiting 1.5 seconds..."
     );
-
 
     await page.waitForTimeout(1500);
 
 
+    const afterWait =
+        await start.inputValue();
+
+
     console.log(
-        "Start after 1.5 sec:",
-        await start.inputValue()
+        "VALUE AFTER 1.5 SEC:",
+        afterWait
     );
 
 
     // ========================================================
-    // STEP 4 - END
+    // SET END
     // ========================================================
 
     console.log("");
-    console.log("========================================");
-    console.log("STEP 4: SETTING JOB END");
-    console.log("========================================");
-
     console.log(
-        "Requested End:",
-        {end_time!r}
+        "8. Setting Job End:",
+        {requested_end!r}
     );
 
-
-    console.log(
-        "End before click:",
-        await end.inputValue()
-    );
-
-
-    await end.scrollIntoViewIfNeeded();
 
     await end.click();
 
-    console.log(
-        "End CLICK completed."
-    );
-
-
     await end.fill(
-        {end_time!r}
+        {requested_end!r}
     );
 
 
-    console.log(
-        "End immediately after fill:",
-        await end.inputValue()
-    );
-
-
-    await page.waitForTimeout(100);
+    const afterEnd =
+        await end.inputValue();
 
 
     console.log(
-        "End after 100ms:",
-        await end.inputValue()
-    );
-
-
-    await page.waitForTimeout(1500);
-
-
-    console.log(
-        "End after 1.5 sec:",
-        await end.inputValue()
+        "Job End after fill:",
+        afterEnd
     );
 
 
     // ========================================================
-    // STEP 5 - FINAL VALUES
+    // CHECK START AGAIN
+    // ========================================================
+
+    const startAfterEnd =
+        await start.inputValue();
+
+
+    console.log(
+        "Job Start after setting End:",
+        startAfterEnd
+    );
+
+
+    // ========================================================
+    // TAB AWAY FROM END
+    // ========================================================
+
+    await end.press("Tab");
+
+    await page.waitForTimeout(500);
+
+
+    const afterTabStart =
+        await start.inputValue();
+
+    const afterTabEnd =
+        await end.inputValue();
+
+
+    console.log("");
+    console.log("9. AFTER TAB:");
+
+    console.log(
+        "Job Start:",
+        afterTabStart
+    );
+
+    console.log(
+        "Job End:",
+        afterTabEnd
+    );
+
+
+    // ========================================================
+    // FINAL PRE-SAVE CHECK
     // ========================================================
 
     console.log("");
     console.log("========================================");
-    console.log("STEP 5: FINAL VALUES");
+    console.log("10. FINAL PRE-SAVE CHECK");
     console.log("========================================");
 
 
@@ -525,60 +484,50 @@ async page => {{
 
 
     console.log(
-        "FINAL START:",
+        "Expected Start:",
+        {requested_start!r}
+    );
+
+    console.log(
+        "Actual Start:",
         finalStart
     );
 
     console.log(
-        "FINAL END:",
+        "Expected End:",
+        {requested_end!r}
+    );
+
+    console.log(
+        "Actual End:",
         finalEnd
     );
 
 
-    // ========================================================
-    // HARD VALIDATION
-    // ========================================================
-
-    if (
-        {start_time!r}
-        && finalStart !== {start_time!r}
-    ) {{
-
+    if (finalStart !== {requested_start!r}) {{
         throw new Error(
-            "JOB START FAILED. "
-            + "Requested="
-            + {start_time!r}
-            + " Actual="
-            + finalStart
+            "JOB START FAILED BEFORE SAVE. " +
+            "Expected " + {requested_start!r} +
+            " but got " + finalStart
         );
-
     }}
 
 
-    if (
-        {end_time!r}
-        && finalEnd !== {end_time!r}
-    ) {{
-
+    if (finalEnd !== {requested_end!r}) {{
         throw new Error(
-            "JOB END FAILED. "
-            + "Requested="
-            + {end_time!r}
-            + " Actual="
-            + finalEnd
+            "JOB END FAILED BEFORE SAVE. " +
+            "Expected " + {requested_end!r} +
+            " but got " + finalEnd
         );
-
     }}
 
 
     // ========================================================
-    // STEP 6 - SAVE
+    // SAVE
     // ========================================================
 
     console.log("");
-    console.log("========================================");
-    console.log("STEP 6: SAVING");
-    console.log("========================================");
+    console.log("11. Saving...");
 
 
     const saveButton = page.getByRole(
@@ -598,12 +547,6 @@ async page => {{
 
     await saveButton.click();
 
-
-    console.log(
-        "Save clicked."
-    );
-
-
     await page.waitForTimeout(2000);
 
 
@@ -612,13 +555,23 @@ async page => {{
     console.log("SAVE COMPLETE");
     console.log("========================================");
 
+    console.log(
+        "URL:",
+        page.url()
+    );
+
 
     return {{
         initialStart,
         initialEnd,
+        afterFill,
+        afterWait,
+        afterEnd,
+        afterTabStart,
+        afterTabEnd,
         finalStart,
         finalEnd,
-        urlAfterSave: page.url()
+        url: page.url()
     }};
 }}
 """
@@ -631,22 +584,13 @@ async page => {{
         with tempfile.NamedTemporaryFile(
             mode="w",
             suffix=".js",
-            prefix="halo_time_test_",
+            prefix="halo_start_test_",
             delete=False,
             encoding="utf-8"
-        ) as temp_file:
+        ) as f:
 
-            temp_file.write(
-                js_code
-            )
-
-            temp_path = temp_file.name
-
-
-        print()
-        print(
-            "Running Playwright time test..."
-        )
+            f.write(js_code)
+            temp_path = f.name
 
 
         run_cli(
@@ -664,13 +608,8 @@ async page => {{
         ):
 
             try:
-
-                os.remove(
-                    temp_path
-                )
-
+                os.remove(temp_path)
             except OSError:
-
                 pass
 
 
@@ -682,104 +621,75 @@ def main():
 
     print()
     print("========================================")
-    print("HALO WORKLOG TIME TEST")
+    print("HALO JOB START TEST")
     print("========================================")
 
 
     try:
-
-        # ------------------------------------------------------
-        # ATTACH TO EXISTING EDGE
-        # ------------------------------------------------------
-
-        attach()
-
-
-        # ------------------------------------------------------
-        # TICKET
-        # ------------------------------------------------------
 
         ticket = input(
             "\nEnter Ticket Number: "
         ).strip()
 
 
-        while (
-            not ticket
-            or not ticket.isdigit()
-        ):
+        if not ticket.isdigit():
 
-            print(
-                "Please enter a valid numeric ticket number."
+            raise ValueError(
+                "Ticket number must be numeric."
             )
 
-            ticket = input(
-                "Enter Ticket Number: "
-            ).strip()
 
-
-        # ------------------------------------------------------
-        # TIMES
-        # ------------------------------------------------------
-
-        start_time = input(
-            "\nStart time "
-            "(e.g. 08:00): "
+        start = input(
+            "Start time (e.g. 08:00): "
         ).strip()
 
 
-        end_time = input(
-            "End time "
-            "(e.g. 09:00): "
+        end = input(
+            "End time (e.g. 09:00): "
         ).strip()
 
 
-        # ------------------------------------------------------
-        # VALIDATE TIME FORMAT
-        # ------------------------------------------------------
+        # IMPORTANT:
+        # validate_time() is called here using the
+        # exact HH:MM regex above.
 
-        if not re.match(
-            r"^\d{{2}}:\d{{2}}$",
-            start_time
-        ):
-
-            raise ValueError(
-                "Start time must be HH:MM, e.g. 08:00"
-            )
+        start = validate_time(start)
+        end = validate_time(end)
 
 
-        if not re.match(
-            r"^\d{{2}}:\d{{2}}$",
-            end_time
-        ):
+        print()
+        print("========================================")
+        print("TEST PARAMETERS")
+        print("========================================")
 
-            raise ValueError(
-                "End time must be HH:MM, e.g. 09:00"
-            )
-
-
-        # ------------------------------------------------------
-        # OPEN TICKET
-        # ------------------------------------------------------
-
-        goto_ticket(
+        print(
+            "Ticket:",
             ticket
         )
 
+        print(
+            "Requested Start:",
+            start
+        )
 
-        # ------------------------------------------------------
-        # RUN MINIMAL TEST
-        # ------------------------------------------------------
+        print(
+            "Requested End:",
+            end
+        )
 
-        run_time_test(
-            start_time,
-            end_time
+
+        goto_ticket(ticket)
+
+        run_test(
+            ticket,
+            start,
+            end
         )
 
 
         print()
         print("========================================")
-        print("TEST COMPLETED SUCCESSFULLY")
+        print("TEST PASSED")
         print("========================================")
 
 
@@ -790,16 +700,10 @@ def main():
         print("TEST FAILED")
         print("========================================")
 
-        print(
-            str(exc)
-        )
+        print(exc)
 
         sys.exit(1)
 
-
-# ============================================================
-# ENTRY POINT
-# ============================================================
 
 if __name__ == "__main__":
     main()
