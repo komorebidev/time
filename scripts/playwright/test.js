@@ -19,7 +19,7 @@ async page => {
     );
 
 
-    console.log("STEP 2: Reading freshly opened values");
+    console.log("STEP 2: Values immediately after opening");
 
     const afterOpen = {
         start: await start.inputValue(),
@@ -33,7 +33,45 @@ async page => {
     );
 
 
-    console.log("STEP 3: Setting Start ONLY");
+    // ------------------------------------------------------------
+    // WORKLOG EDITOR
+    // ------------------------------------------------------------
+
+    console.log("STEP 3: Filling worklog editor");
+
+    const editor = page.locator(
+        '[contenteditable="true"]'
+    ).first();
+
+    await editor.waitFor({
+        state: "visible",
+        timeout: 10000
+    });
+
+    await editor.fill(
+        "Diagnostic worklog test"
+    );
+
+    await page.waitForTimeout(500);
+
+
+    const afterEditor = {
+        start: await start.inputValue(),
+        end: await end.inputValue()
+    };
+
+
+    console.log(
+        "AFTER EDITOR:",
+        JSON.stringify(afterEditor)
+    );
+
+
+    // ------------------------------------------------------------
+    // START
+    // ------------------------------------------------------------
+
+    console.log("STEP 4: Setting Start");
 
     await start.click();
 
@@ -69,6 +107,7 @@ async page => {
 
     return {
         afterOpen,
+        afterEditor,
         afterStart,
         afterWait
     };
