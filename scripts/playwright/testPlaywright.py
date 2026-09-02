@@ -243,9 +243,12 @@ def run_halo_automation(worklog_text, status, start_time, end_time, charge_type)
     start_fill_code = (
         f"""
         const startTimeInput = allInputs.nth(timeInputIndexes[0]);
+        await startTimeInput.click();
+        await startTimeInput.press("Control+A");
         await startTimeInput.fill({start_time!r});
-        await startTimeInput.dispatchEvent("change");
         await startTimeInput.dispatchEvent("input");
+        await startTimeInput.dispatchEvent("change");
+        await startTimeInput.dispatchEvent("blur");
         """
         if start_time
         else "// Start time left unchanged"
@@ -253,9 +256,12 @@ def run_halo_automation(worklog_text, status, start_time, end_time, charge_type)
     end_fill_code = (
         f"""
         const endTimeInput = allInputs.nth(timeInputIndexes[1]);
+        await endTimeInput.click();
+        await endTimeInput.press("Control+A");
         await endTimeInput.fill({end_time!r});
-        await endTimeInput.dispatchEvent("change");
         await endTimeInput.dispatchEvent("input");
+        await endTimeInput.dispatchEvent("change");
+        await endTimeInput.dispatchEvent("blur");
         """
         if end_time
         else "// End time left unchanged"
@@ -589,8 +595,8 @@ def main():
                 else:
                     print("Invalid selection. Try again or enter custom text.")
             elif not charge_input:
-                charge_type = default_charge
-                break
+                    charge_type = default_charge
+                    break
             else:
                 charge_type = charge_input
                 break
