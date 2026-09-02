@@ -238,15 +238,25 @@ def scrape_ticket_options():
 
 def run_halo_automation(worklog_text, status, start_time, end_time, charge_type):
     """
-    Run the actual HaloPSA Worklog automation using Playwright code.
+    Run the actual HaloPSA Worklog automation using Playwright code with robust dropdown and submit handling.
     """
     start_fill_code = (
-        f"await allInputs.nth(timeInputIndexes[0]).fill({start_time!r});"
+        f"""
+        const startTimeInput = allInputs.nth(timeInputIndexes[0]);
+        await startTimeInput.fill({start_time!r});
+        await startTimeInput.dispatchEvent("change");
+        await startTimeInput.dispatchEvent("input");
+        """
         if start_time
         else "// Start time left unchanged"
     )
     end_fill_code = (
-        f"await allInputs.nth(timeInputIndexes[1]).fill({end_time!r});"
+        f"""
+        const endTimeInput = allInputs.nth(timeInputIndexes[1]);
+        await endTimeInput.fill({end_time!r});
+        await endTimeInput.dispatchEvent("change");
+        await endTimeInput.dispatchEvent("input");
+        """
         if end_time
         else "// End time left unchanged"
     )
@@ -254,7 +264,6 @@ def run_halo_automation(worklog_text, status, start_time, end_time, charge_type)
     js_code = textwrap.dedent(
         f"""
         async page => {{
-
             console.log("Opening Worklog...");
 
             await page.getByRole("button", {{
@@ -278,9 +287,7 @@ def run_halo_automation(worklog_text, status, start_time, end_time, charge_type)
                 timeout: 10000
             }});
 
-            await editor.fill(
-                {worklog_text!r}
-            );
+            await editor.fill({worklog_text!r});
 
             // ---------------------------------------------------------
             // STATUS
@@ -300,7 +307,7 @@ def run_halo_automation(worklog_text, status, start_time, end_time, charge_type)
                 await page.getByText({status!r}, {{ exact: true }}).click();
             }} catch (e) {{
                 await page.evaluate((targetText) => {{
-                    const items = Array.from(document.querySelectorAll('.dropdown-item, [role=\\'option\\'], li, div'));
+                    const items = Array.from(document.querySelectorAll('.dropdown-item, [role="option"], li, div, .Select__option'));
                     const match = items.find(el => el.textContent.trim() === targetText);
                     if (match) match.click();
                 }}, {status!r});
@@ -312,6 +319,20 @@ def run_halo_automation(worklog_text, status, start_time, end_time, charge_type)
 
             console.log("Job Start Time input: {start_time if start_time else '(Leave unchanged)'}");
             console.log("Job End Time input: {end_time if end_time else '(Leave unchanged)'}");
+
+            console.log("Waiting for HaloPSA system time fields to render...");
+
+            // Wait until HaloPSA populates the default system time fields (indicated by a colon ':')
+            await page.waitForFunction(() => {{
+                const inputs = Array.from(document.querySelectorAll("input"));
+                const timeInputs = inputs.filter(input => {{
+                    const style = window.getComputedStyle(input);
+                    if (style.display === "none" || style.visibility === "hidden") return false;
+                    const val = input.value || "";
+                    return val.includes(":") && !val.includes("-") && !val.includes("/");
+                }});
+                return timeInputs.length >= 2;
+            }}, {{ timeout: 10000 }});
 
             const timeInputIndexes = await page.locator("input").evaluateAll(inputs => {{
                 const result = [];
@@ -343,50 +364,87 @@ def run_halo_automation(worklog_text, status, start_time, end_time, charge_type)
             {end_fill_code}
 
             // ---------------------------------------------------------
-            // CHARGE TYPE
+            // CHARGE TYPE (REACT-SELECT COMPATIBLE)
             // ---------------------------------------------------------
 
-            console.log(
-                "Setting charge type: {charge_type}"
-            );
+            console.log("Setting charge type: {charge_type}");
 
-            const chargeTypeCombobox = page.getByRole(
-                "combobox",
-                {{ name: "Charge Type *" }}
-            );
+            let chargeSelected = false;
+            for (let attempt = 1; attempt <= 3; attempt++) {{
+                try {{
+                    const chargeTypeCombobox = page.getByRole(
+                        "combobox",
+                        {{ name: "Charge Type *" }}
+                    );
+                    await chargeTypeCombobox.click();
+                    await page.waitForTimeout(800);
 
-            await chargeTypeCombobox.click();
-            await page.waitForTimeout(800);
+                    const clicked = await page.evaluate((targetText) => {{
+                        const selectors = [
+                            '.Select__option',
+                            '.dropdown-item', 
+                            '[role="option"]', 
+                            'li', 
+                            '.select2-results__option', 
+                            '.ng-option',
+                            'div',
+                            'span'
+                        ];
+                        for (const sel of selectors) {{
+                            const items = Array.from(document.querySelectorAll(sel));
+                            const match = items.find(el => el.offsetParent !== null && el.textContent.trim() === targetText);
+                            if (match) {{
+                                match.click();
+                                return true;
+                            }}
+                        }}
+                        return false;
+                    }}, {charge_type!r});
 
-            try {{
-                await page.getByText({charge_type!r}, {{ exact: true }}).click();
-            }} catch (e) {{
-                await page.evaluate((targetText) => {{
-                    const items = Array.from(document.querySelectorAll('.dropdown-item, [role=\\'option\\'], li, div, span'));
-                    const match = items.find(el => el.textContent.trim() === targetText);
-                    if (match) match.click();
-                }}, {charge_type!r});
+                    if (clicked) {{
+                        chargeSelected = true;
+                        break;
+                    }}
+                }} catch (err) {{
+                    console.log("Attempt " + attempt + " failed, retrying...");
+                }}
+                await page.waitForTimeout(1000);
             }}
 
+            if (!chargeSelected) {{
+                try {{
+                    await page.keyboard.type({charge_type!r});
+                    await page.keyboard.press("Enter");
+                    chargeSelected = true;
+                }} catch (e) {{
+                    throw new Error("Failed to select Charge Type: " + {charge_type!r});
+                }}
+            }}
+
+            await page.waitForTimeout(1000);
+
             // ---------------------------------------------------------
-            // FINAL CHECK
+            // SAVE (ROBUST SUBMIT BYPASSING OVERLAYS)
             // ---------------------------------------------------------
 
-            console.log(
-                "Worklog fields populated. Saving..."
-            );
+            console.log("Worklog fields populated. Saving...");
 
-            await page.waitForTimeout(500);
+            await page.evaluate(() => {{
+                document.body.click();
+                
+                const saveBtn = Array.from(document.querySelectorAll('input[type="submit"], button')).find(
+                    el => el.value === "Save" || el.textContent.trim() === "Save"
+                );
+                if (saveBtn) {{
+                    saveBtn.click();
+                }} else {{
+                    throw new Error("Save button not found in DOM.");
+                }}
+            }});
 
-            await page.getByRole(
-                "button",
-                {{ name: "Save", exact: true }}
-            ).click();
-
-            await page.waitForTimeout(1500);
+            await page.waitForTimeout(2000);
 
             console.log("Worklog saved.");
-
         }}
         """
     )
