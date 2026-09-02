@@ -10,7 +10,6 @@ import tempfile
 import textwrap
 import time
 
-
 BASE_URL = "https://support.eiresystems.com/ticket"
 
 ASSIGNED_TICKETS_URL = (
@@ -115,10 +114,8 @@ def run_cli(*args, check=True):
     if result.stdout:
         print(result.stdout)
 
-    if (
-        check
-        and result.returncode != 0
-    ):
+    if check and result.returncode != 0:
+
         raise RuntimeError(
             "Playwright CLI command failed "
             f"with exit code {result.returncode}"
@@ -133,7 +130,8 @@ def run_cli(*args, check=True):
 
 def remove_readonly(func, path, excinfo):
     """
-    Error handler for shutil.rmtree on Windows.
+    Error handler for shutil.rmtree to clear
+    read-only bits and retry on Windows.
     """
     os.chmod(
         path,
@@ -195,61 +193,13 @@ atexit.register(
 
 
 # ============================================================
-# INPUT VALIDATION
-# ============================================================
-
-def normalize_time(value, field_name):
-    """
-    Validate and normalize HH:MM input.
-
-    Accepts:
-        08:00
-        8:00
-
-    Returns:
-        08:00
-
-    Empty input means leave unchanged.
-    """
-
-    value = value.strip()
-
-    if not value:
-        return ""
-
-    match = re.fullmatch(
-        r"(\d{1,2}):(\d{2})",
-        value
-    )
-
-    if not match:
-        raise ValueError(
-            f"{field_name} must be HH:MM, e.g. 08:00"
-        )
-
-    hour = int(match.group(1))
-    minute = int(match.group(2))
-
-    if hour < 0 or hour > 23:
-        raise ValueError(
-            f"{field_name} hour must be between 00 and 23."
-        )
-
-    if minute < 0 or minute > 59:
-        raise ValueError(
-            f"{field_name} minute must be between 00 and 59."
-        )
-
-    return f"{hour:02d}:{minute:02d}"
-
-
-# ============================================================
 # EDGE / NAVIGATION
 # ============================================================
 
 def attach():
     """
-    Attach playwright-cli to the existing Microsoft Edge session.
+    Attach playwright-cli to the existing Microsoft Edge session
+    and open the Assigned Tickets view.
     """
 
     print(
@@ -307,7 +257,7 @@ def goto_ticket(ticket):
 
 def parse_snapshot_tickets(snapshot_output):
     """
-    Parse Playwright CLI snapshot output
+    Parse playwright-cli snapshot output
     into ticket dictionaries.
     """
 
@@ -407,7 +357,9 @@ def _parse_single_block(block_lines):
                         and not val.startswith('[')
                     ):
 
-                        clean_lines.append(val)
+                        clean_lines.append(
+                            val
+                        )
 
     for i, l in enumerate(clean_lines):
 
@@ -443,10 +395,7 @@ def _parse_single_block(block_lines):
             date_str = l
 
             if i > 0:
-
-                ticket_name = clean_lines[
-                    i - 1
-                ]
+                ticket_name = clean_lines[i - 1]
 
         elif l in [
             "Service Request",
@@ -500,6 +449,35 @@ def scrape_ticket_options():
 
 
 # ============================================================
+# TIME VALIDATION
+# ============================================================
+
+def validate_time(value):
+    """
+    Validate HH:MM time.
+
+    Empty string means leave unchanged.
+    """
+
+    value = value.strip()
+
+    if not value:
+        return ""
+
+    if not re.fullmatch(
+        r"(?:[01]\d|2[0-3]):[0-5]\d",
+        value
+    ):
+
+        raise ValueError(
+            f"Invalid time '{value}'. "
+            "Time must be HH:MM, e.g. 08:00"
+        )
+
+    return value
+
+
+# ============================================================
 # HALO WORKLOG AUTOMATION
 # ============================================================
 
@@ -511,16 +489,17 @@ def run_halo_automation(
     charge_type
 ):
     """
-    Run HaloPSA Worklog automation.
+    Run the HaloPSA Worklog automation.
 
     IMPORTANT ORDER:
 
-    1. Open Worklog
-    2. Find Job Start
-    3. Click Job Start
-    4. Fill Job Start
-    5. Verify Job Start
-    6. Continue with remaining fields
+        1. Open Worklog
+        2. Find Job Start
+        3. Click Job Start
+        4. Fill Job Start
+
+    Only AFTER Job Start has been handled do we
+    interact with the other worklog fields.
 
     Job Start:
         input[name="actionarrivaldate_time"]
@@ -528,9 +507,15 @@ def run_halo_automation(
     Job End:
         input[name="actioncompletiondate_time"]
 
-    We deliberately DO NOT identify these fields
-    by their position among all inputs.
+    These fields are addressed directly by their
+    actual HTML name attributes.
+
+    We deliberately DO NOT determine their positions
+    by looking through all input elements.
     """
+
+    start_time = validate_time(start_time)
+    end_time = validate_time(end_time)
 
     js_code = textwrap.dedent(
         f"""
@@ -547,21 +532,16 @@ def run_halo_automation(
             // ====================================================
 
             console.log("");
-            console.log("STEP 1: Opening Worklog...");
+            console.log("STEP 1: OPEN WORKLOG");
 
-            const worklogButton = page.getByRole(
+
+            await page.getByRole(
                 "button",
                 {{
                     name: "Worklog"
                 }}
-            );
+            ).click();
 
-            await worklogButton.waitFor({{
-                state: "visible",
-                timeout: 10000
-            }});
-
-            await worklogButton.click();
 
             await page.waitForTimeout(1500);
 
@@ -571,38 +551,51 @@ def run_halo_automation(
             // ====================================================
 
             console.log("");
-            console.log("STEP 2: Finding Job Start...");
+            console.log("STEP 2: FIND JOB START");
+
 
             const startTimeInput = page.locator(
                 'input[name="actionarrivaldate_time"]'
             );
 
-            const startCount =
-                await startTimeInput.count();
-
-            console.log(
-                "Job Start matching elements:",
-                startCount
-            );
-
-            if (startCount !== 1) {{
-                throw new Error(
-                    "Expected exactly one Job Start input, found "
-                    + startCount
-                );
-            }}
 
             await startTimeInput.waitFor({{
                 state: "visible",
                 timeout: 10000
             }});
 
-            console.log(
-                "Job Start found."
-            );
+
+            const startCount =
+                await startTimeInput.count();
+
+
+            if (startCount !== 1) {{
+                throw new Error(
+                    "Expected exactly 1 Job Start input, found "
+                    + startCount
+                );
+            }}
+
 
             console.log(
-                "Job Start current value:",
+                "Job Start located."
+            );
+
+
+            console.log(
+                "Job Start ID:",
+                await startTimeInput.getAttribute("id")
+            );
+
+
+            console.log(
+                "Job Start name:",
+                await startTimeInput.getAttribute("name")
+            );
+
+
+            console.log(
+                "Job Start initial value:",
                 await startTimeInput.inputValue()
             );
 
@@ -612,29 +605,23 @@ def run_halo_automation(
             // ====================================================
 
             console.log("");
-            console.log("STEP 3: Clicking Job Start...");
+            console.log("STEP 3: CLICK JOB START");
+
 
             await startTimeInput.click();
 
-            await page.waitForTimeout(150);
-
-
-            const focusedAfterClick =
-                await startTimeInput.evaluate(
-                    el => document.activeElement === el
-                );
 
             console.log(
-                "Job Start focused after click:",
-                focusedAfterClick
+                "Job Start clicked."
             );
 
-            if (!focusedAfterClick) {{
-                throw new Error(
-                    "Job Start was located and clicked, "
-                    + "but it did not receive focus."
-                );
-            }}
+
+            console.log(
+                "Job Start focused:",
+                await startTimeInput.evaluate(
+                    el => document.activeElement === el
+                )
+            );
 
 
             // ====================================================
@@ -644,22 +631,23 @@ def run_halo_automation(
             if ({start_time!r}) {{
 
                 console.log("");
-                console.log("STEP 4: Filling Job Start...");
+                console.log("STEP 4: FILL JOB START");
+
 
                 console.log(
                     "Requested Job Start:",
                     {start_time!r}
                 );
 
+
                 await startTimeInput.fill(
                     {start_time!r}
                 );
 
-                await page.waitForTimeout(150);
-
 
                 const startAfterFill =
                     await startTimeInput.inputValue();
+
 
                 console.log(
                     "Job Start after fill:",
@@ -672,42 +660,71 @@ def run_halo_automation(
                 ) {{
 
                     throw new Error(
-                        "Job Start did not contain the "
-                        + "requested value after fill. "
-                        + "Expected: "
+                        "Job Start did not accept requested "
+                        + "value. Requested="
                         + {start_time!r}
-                        + " Actual: "
+                        + " Actual="
                         + startAfterFill
                     );
+
                 }}
+
 
             }} else {{
 
                 console.log(
-                    "No Job Start supplied; "
-                    + "leaving existing value unchanged."
+                    "No Job Start supplied. "
+                    + "Leaving Job Start unchanged."
                 );
 
             }}
 
 
             // ====================================================
-            // JOB END LOCATOR
+            // VERIFY START BEFORE TOUCHING ANY OTHER FIELD
             // ====================================================
 
             console.log("");
             console.log(
-                "Finding Job End..."
+                "VERIFYING JOB START BEFORE OTHER FIELDS"
             );
+
+
+            const verifiedStart =
+                await startTimeInput.inputValue();
+
+
+            console.log(
+                "Verified Job Start:",
+                verifiedStart
+            );
+
+
+            // ====================================================
+            // ONLY NOW FIND JOB END
+            // ====================================================
+
+            console.log("");
+            console.log(
+                "STEP 5: FIND JOB END"
+            );
+
 
             const endTimeInput = page.locator(
                 'input[name="actioncompletiondate_time"]'
             );
 
+
             await endTimeInput.waitFor({{
                 state: "visible",
                 timeout: 10000
             }});
+
+
+            console.log(
+                "Job End initial value:",
+                await endTimeInput.inputValue()
+            );
 
 
             // ====================================================
@@ -716,23 +733,60 @@ def run_halo_automation(
 
             console.log("");
             console.log(
-                "Entering worklog text..."
+                "STEP 6: ENTER WORKLOG TEXT"
             );
+
 
             const editor = page.locator(
                 '[contenteditable="true"]'
             ).first();
+
 
             await editor.waitFor({{
                 state: "visible",
                 timeout: 10000
             }});
 
+
             await editor.fill(
                 {worklog_text!r}
             );
 
-            await page.waitForTimeout(300);
+
+            // ====================================================
+            // SET JOB END
+            // ====================================================
+
+            console.log("");
+            console.log(
+                "STEP 7: SET JOB END"
+            );
+
+
+            if ({end_time!r}) {{
+
+                await endTimeInput.click();
+
+
+                await endTimeInput.fill(
+                    {end_time!r}
+                );
+
+
+                console.log(
+                    "Job End after fill:",
+                    await endTimeInput.inputValue()
+                );
+
+
+            }} else {{
+
+                console.log(
+                    "No Job End supplied. "
+                    + "Leaving Job End unchanged."
+                );
+
+            }}
 
 
             // ====================================================
@@ -741,8 +795,9 @@ def run_halo_automation(
 
             console.log("");
             console.log(
-                "Setting status: {status}"
+                "STEP 8: SET STATUS: {status}"
             );
+
 
             const statusCombobox = page.getByRole(
                 "combobox",
@@ -751,12 +806,9 @@ def run_halo_automation(
                 }}
             );
 
-            await statusCombobox.waitFor({{
-                state: "visible",
-                timeout: 10000
-            }});
 
             await statusCombobox.click();
+
 
             await page.waitForTimeout(500);
 
@@ -774,112 +826,11 @@ def run_halo_automation(
                 timeout: 10000
             }});
 
+
             await statusOption.click();
 
+
             await page.waitForTimeout(500);
-
-
-            // ====================================================
-            // JOB END
-            // ====================================================
-
-            if ({end_time!r}) {{
-
-                console.log("");
-                console.log("Setting Job End...");
-
-                console.log(
-                    "Requested Job End:",
-                    {end_time!r}
-                );
-
-                await endTimeInput.click();
-
-                await endTimeInput.fill(
-                    {end_time!r}
-                );
-
-                await page.waitForTimeout(150);
-
-
-                const endAfterFill =
-                    await endTimeInput.inputValue();
-
-                console.log(
-                    "Job End after fill:",
-                    endAfterFill
-                );
-
-
-                if (
-                    endAfterFill !== {end_time!r}
-                ) {{
-
-                    throw new Error(
-                        "Job End did not contain the "
-                        + "requested value after fill. "
-                        + "Expected: "
-                        + {end_time!r}
-                        + " Actual: "
-                        + endAfterFill
-                    );
-                }}
-
-            }} else {{
-
-                console.log(
-                    "No Job End supplied; "
-                    + "leaving existing value unchanged."
-                );
-
-            }}
-
-
-            // ====================================================
-            // VERIFY BOTH TIMES
-            // ====================================================
-
-            console.log("");
-            console.log("========================================");
-            console.log("TIME VERIFICATION");
-            console.log("========================================");
-
-            const verifiedStart =
-                await startTimeInput.inputValue();
-
-            const verifiedEnd =
-                await endTimeInput.inputValue();
-
-            console.log(
-                "Job Start:",
-                verifiedStart
-            );
-
-            console.log(
-                "Job End:",
-                verifiedEnd
-            );
-
-
-            if (
-                {start_time!r}
-                && verifiedStart !== {start_time!r}
-            ) {{
-
-                throw new Error(
-                    "FINAL Job Start verification failed."
-                );
-            }}
-
-            if (
-                {end_time!r}
-                && verifiedEnd !== {end_time!r}
-            ) {{
-
-                throw new Error(
-                    "FINAL Job End verification failed."
-                );
-            }}
 
 
             // ====================================================
@@ -888,8 +839,9 @@ def run_halo_automation(
 
             console.log("");
             console.log(
-                "Setting charge type: {charge_type}"
+                "STEP 9: SET CHARGE TYPE: {charge_type}"
             );
+
 
             const chargeCombobox = page.getByRole(
                 "combobox",
@@ -898,12 +850,9 @@ def run_halo_automation(
                 }}
             );
 
-            await chargeCombobox.waitFor({{
-                state: "visible",
-                timeout: 10000
-            }});
 
             await chargeCombobox.click();
+
 
             await page.waitForTimeout(500);
 
@@ -921,33 +870,49 @@ def run_halo_automation(
                 timeout: 10000
             }});
 
+
             await chargeOption.click();
+
 
             await page.waitForTimeout(500);
 
 
             // ====================================================
-            // FINAL CHECK BEFORE SAVE
+            // FINAL VERIFICATION
             // ====================================================
 
             console.log("");
-            console.log("========================================");
-            console.log("FINAL VALUES BEFORE SAVE");
-            console.log("========================================");
+            console.log(
+                "========================================"
+            );
+            console.log(
+                "FINAL VERIFICATION BEFORE SAVE"
+            );
+            console.log(
+                "========================================"
+            );
+
 
             const finalStart =
-                await startTimeInput.inputValue();
+                await page.locator(
+                    'input[name="actionarrivaldate_time"]'
+                ).inputValue();
+
 
             const finalEnd =
-                await endTimeInput.inputValue();
+                await page.locator(
+                    'input[name="actioncompletiondate_time"]'
+                ).inputValue();
+
 
             console.log(
-                "Job Start:",
+                "FINAL Job Start:",
                 finalStart
             );
 
+
             console.log(
-                "Job End:",
+                "FINAL Job End:",
                 finalEnd
             );
 
@@ -958,13 +923,14 @@ def run_halo_automation(
             ) {{
 
                 throw new Error(
-                    "Job Start changed unexpectedly before save."
-                    + " Expected "
-                    + {start_time!r}
-                    + " but found "
+                    "FINAL CHECK FAILED: Job Start is "
                     + finalStart
+                    + " but expected "
+                    + {start_time!r}
                 );
+
             }}
+
 
             if (
                 {end_time!r}
@@ -972,12 +938,12 @@ def run_halo_automation(
             ) {{
 
                 throw new Error(
-                    "Job End changed unexpectedly before save."
-                    + " Expected "
-                    + {end_time!r}
-                    + " but found "
+                    "FINAL CHECK FAILED: Job End is "
                     + finalEnd
+                    + " but expected "
+                    + {end_time!r}
                 );
+
             }}
 
 
@@ -987,8 +953,9 @@ def run_halo_automation(
 
             console.log("");
             console.log(
-                "Saving worklog..."
+                "STEP 10: SAVE"
             );
+
 
             const saveButton = page.getByRole(
                 "button",
@@ -998,31 +965,35 @@ def run_halo_automation(
                 }}
             );
 
+
             await saveButton.waitFor({{
                 state: "visible",
                 timeout: 10000
             }});
 
+
             await saveButton.click();
+
 
             await page.waitForTimeout(2000);
 
 
             console.log("");
-            console.log("========================================");
-            console.log("WORKLOG SAVED");
-            console.log("========================================");
-
             console.log(
-                "URL:",
-                page.url()
+                "========================================"
+            );
+            console.log(
+                "WORKLOG SAVED"
+            );
+            console.log(
+                "========================================"
             );
 
 
             return {{
-                finalStart,
-                finalEnd,
-                urlAfterSave: page.url()
+                start: finalStart,
+                end: finalEnd,
+                url: page.url()
             }};
         }}
         """
@@ -1068,13 +1039,11 @@ def run_halo_automation(
         ):
 
             try:
-
                 os.remove(
                     temp_path
                 )
 
             except OSError:
-
                 pass
 
 
@@ -1124,6 +1093,7 @@ def main():
 
         ticket = ""
 
+
         choice = input(
             "\n[1] Enter Ticket ID manually\n"
             "[2] Scrape Ticket IDs & metadata "
@@ -1135,6 +1105,7 @@ def main():
         if choice == "2":
 
             tickets = scrape_ticket_options()
+
 
             if tickets:
 
@@ -1185,6 +1156,7 @@ def main():
                         int(sel) - 1
                     ]["id"]
 
+
                     print(
                         f"Selected Ticket ID: {ticket}"
                     )
@@ -1192,6 +1164,7 @@ def main():
                 else:
 
                     ticket = sel
+
 
             else:
 
@@ -1234,6 +1207,7 @@ def main():
 
         worklog_text = ""
 
+
         while not worklog_text:
 
             worklog_text = input(
@@ -1258,9 +1232,11 @@ def main():
             "On Hold"
         ]
 
+
         default_status = (
             "Completed (On Hold)"
         )
+
 
         status = default_status
 
@@ -1319,7 +1295,7 @@ def main():
 
                     print(
                         "Invalid selection. "
-                        "Try again."
+                        "Try again or enter custom text."
                     )
 
 
@@ -1343,14 +1319,16 @@ def main():
 
         while True:
 
+            start_time = input(
+                "\nStart time "
+                "[Leave unchanged, e.g. 09:00]: "
+            ).strip()
+
+
             try:
 
-                start_time = normalize_time(
-                    input(
-                        "Start time "
-                        "[Leave unchanged, e.g. 09:00]: "
-                    ),
-                    "Start time"
+                start_time = validate_time(
+                    start_time
                 )
 
                 break
@@ -1358,20 +1336,22 @@ def main():
             except ValueError as exc:
 
                 print(
-                    f"Error: {exc}"
+                    exc
                 )
 
 
         while True:
 
+            end_time = input(
+                "End time "
+                "[Leave unchanged, e.g. 10:00]: "
+            ).strip()
+
+
             try:
 
-                end_time = normalize_time(
-                    input(
-                        "End time "
-                        "[Leave unchanged, e.g. 10:00]: "
-                    ),
-                    "End time"
+                end_time = validate_time(
+                    end_time
                 )
 
                 break
@@ -1379,7 +1359,7 @@ def main():
             except ValueError as exc:
 
                 print(
-                    f"Error: {exc}"
+                    exc
                 )
 
 
@@ -1393,6 +1373,7 @@ def main():
             "Professional Development",
             "Internal Work"
         ]
+
 
         default_charge = "Internal Work"
 
@@ -1453,7 +1434,7 @@ def main():
 
                     print(
                         "Invalid selection. "
-                        "Try again."
+                        "Try again or enter custom text."
                     )
 
 
