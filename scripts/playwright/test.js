@@ -8,128 +8,36 @@ async page => {
         'input[name="actioncompletiondate_time"]'
     );
 
-    const report = {};
-
-    // ------------------------------------------------------------
-    // Initial
-    // ------------------------------------------------------------
-
-    report.initial = {
-        start: await start.inputValue(),
-        end: await end.inputValue()
-    };
-
-
-    // ------------------------------------------------------------
-    // Set START
-    // ------------------------------------------------------------
-
+    // Set known values
     await start.fill("08:00");
-
-    report.afterStart = {
-        start: await start.inputValue(),
-        end: await end.inputValue()
-    };
-
-
-    // ------------------------------------------------------------
-    // Set END
-    // ------------------------------------------------------------
-
     await end.fill("09:00");
 
-    report.afterEnd = {
+    // Verify immediately before save
+    const beforeSave = {
         start: await start.inputValue(),
         end: await end.inputValue()
     };
 
+    console.log("BEFORE SAVE:", beforeSave);
 
-    // ------------------------------------------------------------
-    // Open STATUS
-    // ------------------------------------------------------------
-
-    const statusCombobox = page.getByRole(
-        "combobox",
-        { name: "Status *" }
+    // Save
+    const saveButton = page.getByRole(
+        "button",
+        {
+            name: "Save",
+            exact: true
+        }
     );
 
-    await statusCombobox.click();
+    await saveButton.click();
 
-    await page.waitForTimeout(500);
+    // Give Halo time to process the save
+    await page.waitForTimeout(2000);
 
-    report.afterStatusOpen = {
-        start: await start.inputValue(),
-        end: await end.inputValue()
+    console.log("URL:", page.url());
+
+    return {
+        beforeSave,
+        urlAfterSave: page.url()
     };
-
-
-    // ------------------------------------------------------------
-    // Select STATUS
-    // ------------------------------------------------------------
-
-    const statusOption = page.locator(
-        ".Select__option",
-        { hasText: "Completed (On Hold)" }
-    ).last();
-
-    await statusOption.click();
-
-    await page.waitForTimeout(500);
-
-    report.afterStatus = {
-        start: await start.inputValue(),
-        end: await end.inputValue()
-    };
-
-
-    // ------------------------------------------------------------
-    // Open CHARGE TYPE
-    // ------------------------------------------------------------
-
-    const chargeCombobox = page.getByRole(
-        "combobox",
-        { name: "Charge Type *" }
-    );
-
-    await chargeCombobox.click();
-
-    await page.waitForTimeout(500);
-
-    report.afterChargeOpen = {
-        start: await start.inputValue(),
-        end: await end.inputValue()
-    };
-
-
-    // ------------------------------------------------------------
-    // Select CHARGE TYPE
-    // ------------------------------------------------------------
-
-    const chargeOption = page.locator(
-        ".Select__option",
-        { hasText: "Internal Work" }
-    ).last();
-
-    await chargeOption.click();
-
-    await page.waitForTimeout(500);
-
-    report.afterCharge = {
-        start: await start.inputValue(),
-        end: await end.inputValue()
-    };
-
-
-    // ------------------------------------------------------------
-    // FINAL
-    // ------------------------------------------------------------
-
-    report.final = {
-        start: await start.inputValue(),
-        end: await end.inputValue()
-    };
-
-
-    return report;
 }
-
