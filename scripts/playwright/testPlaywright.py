@@ -25,6 +25,10 @@ ASSIGNED_TICKETS_URL = (
 SESSION = "halo"
 
 
+# ============================================================
+# PLAYWRIGHT CLI
+# ============================================================
+
 def find_playwright_cli():
     """
     Find playwright-cli without hard-coding the Windows username.
@@ -123,6 +127,10 @@ def run_cli(*args, check=True):
     return result.stdout
 
 
+# ============================================================
+# CLEANUP
+# ============================================================
+
 def remove_readonly(func, path, excinfo):
     """
     Error handler for shutil.rmtree to clear read-only bits
@@ -139,7 +147,8 @@ def remove_readonly(func, path, excinfo):
 
 def cleanup_local_artifacts():
     """
-    Remove local .playwright or .playwright-cli folders.
+    Remove local Playwright folders created in the working
+    directory.
     """
 
     folders_to_remove = [
@@ -188,10 +197,14 @@ atexit.register(
 )
 
 
+# ============================================================
+# EDGE / NAVIGATION
+# ============================================================
+
 def attach():
     """
-    Attach the CLI session to Microsoft Edge and open
-    the Assigned Tickets view.
+    Attach playwright-cli to the existing Microsoft Edge session
+    and open the Assigned Tickets view.
     """
 
     print(
@@ -221,7 +234,7 @@ def attach():
 
 def goto_ticket(ticket):
     """
-    Navigate directly to the requested Halo ticket.
+    Navigate directly to a Halo ticket.
     """
 
     url = (
@@ -236,16 +249,20 @@ def goto_ticket(ticket):
 
     run_cli(
         "goto",
-        url
+        url,
+        check=True
     )
 
     time.sleep(1)
 
 
+# ============================================================
+# TICKET SNAPSHOT PARSING
+# ============================================================
+
 def parse_snapshot_tickets(snapshot_output):
     """
-    Parse the playwright-cli snapshot text output into
-    structured ticket dictionaries.
+    Parse playwright-cli snapshot output into ticket dictionaries.
     """
 
     tickets = []
@@ -440,6 +457,10 @@ def scrape_ticket_options():
     )
 
 
+# ============================================================
+# HALO WORKLOG AUTOMATION
+# ============================================================
+
 def run_halo_automation(
     worklog_text,
     status,
@@ -448,10 +469,9 @@ def run_halo_automation(
     charge_type
 ):
     """
-    Run the HaloPSA Worklog automation.
+    Create and save a HaloPSA Worklog.
 
-    The Job Start and Job End fields use the actual HTML
-    name attributes discovered from the live Halo page:
+    Known-good selectors discovered from the live Halo page:
 
         Job Start:
             input[name="actionarrivaldate_time"]
@@ -459,20 +479,18 @@ def run_halo_automation(
         Job End:
             input[name="actioncompletiondate_time"]
 
-    We deliberately do NOT use snapshot ref numbers,
-    global input indexes, or the generated IDs containing
-    "undefined".
+    These are deliberately used instead of snapshot refs,
+    input indexes, or generated IDs.
     """
 
     js_code = f"""
 async page => {{
 
-    console.log("Opening Worklog...");
-
-
-    // ---------------------------------------------------------
+    // ========================================================
     // OPEN WORKLOG
-    // ---------------------------------------------------------
+    // ========================================================
+
+    console.log("Opening Worklog...");
 
     await page.getByRole(
         "button",
@@ -481,146 +499,58 @@ async page => {{
         }}
     ).click();
 
-
     await page.waitForTimeout(1500);
 
 
-    // ---------------------------------------------------------
+    // ========================================================
     // WORKLOG TEXT
-    // ---------------------------------------------------------
+    // ========================================================
 
-    console.log(
-        "Entering worklog..."
-    );
-
+    console.log("Entering worklog...");
 
     const editor = page.locator(
         '[contenteditable="true"]'
     ).first();
-
 
     await editor.waitFor({{
         state: "visible",
         timeout: 10000
     }});
 
-
     await editor.fill(
         {worklog_text!r}
     );
 
 
-    // ---------------------------------------------------------
-    // STATUS
-    // ---------------------------------------------------------
-
-    console.log(
-        "Setting status: {status}"
-    );
-
-
-    const statusCombobox =
-        page.getByRole(
-            "combobox",
-            {{
-                name: "Status *"
-            }}
-        );
-
-
-    await statusCombobox.click();
-
-
-    await page.waitForTimeout(800);
-
-
-    try {{
-
-        await page.getByText(
-            {status!r},
-            {{
-                exact: true
-            }}
-        ).click();
-
-    }} catch (e) {{
-
-        await page.evaluate(
-            targetText => {{
-
-                const items =
-                    Array.from(
-                        document.querySelectorAll(
-                            '.dropdown-item, [role="option"], li, div, .Select__option'
-                        )
-                    );
-
-
-                const match =
-                    items.find(
-                        el =>
-                            el.offsetParent !== null
-                            &&
-                            el.textContent.trim()
-                                === targetText
-                    );
-
-
-                if (match) {{
-
-                    match.click();
-
-                }}
-
-            }},
-            {status!r}
-        );
-    }}
-
-
-    // ---------------------------------------------------------
-    // JOB START / END TIMES
-    // ---------------------------------------------------------
+    // ========================================================
+    // JOB START / END
+    // ========================================================
 
     console.log("");
     console.log(
         "========================================"
     );
     console.log(
-        "JOB START / END TIMES"
+        "SETTING JOB START / JOB END"
     );
     console.log(
         "========================================"
     );
 
 
-    // These are the actual HTML name attributes discovered
-    // from the live Halo page.
-    //
-    // Job Start:
-    // actionarrivaldate_time
-    //
-    // Job End:
-    // actioncompletiondate_time
+    const startTimeInput = page.locator(
+        'input[name="actionarrivaldate_time"]'
+    );
 
-
-    const startTimeInput =
-        page.locator(
-            'input[name="actionarrivaldate_time"]'
-        );
-
-
-    const endTimeInput =
-        page.locator(
-            'input[name="actioncompletiondate_time"]'
-        );
+    const endTimeInput = page.locator(
+        'input[name="actioncompletiondate_time"]'
+    );
 
 
     await startTimeInput.waitFor({{
         state: "visible",
         timeout: 10000
     }});
-
 
     await endTimeInput.waitFor({{
         state: "visible",
@@ -629,20 +559,19 @@ async page => {{
 
 
     console.log(
-        "Job Start current value:",
+        "Initial Job Start:",
         await startTimeInput.inputValue()
     );
 
-
     console.log(
-        "Job End current value:",
+        "Initial Job End:",
         await endTimeInput.inputValue()
     );
 
 
-    // ---------------------------------------------------------
-    // JOB START
-    // ---------------------------------------------------------
+    // ========================================================
+    // START TIME
+    // ========================================================
 
     if ({start_time!r}) {{
 
@@ -651,40 +580,30 @@ async page => {{
             {start_time!r}
         );
 
-
-        await startTimeInput.click();
-
-
         await startTimeInput.fill(
             {start_time!r}
         );
 
-
-        // Blur the field so Halo receives the change.
-        await startTimeInput.press(
-            "Tab"
-        );
-
-
-        await page.waitForTimeout(750);
-
+        await page.waitForTimeout(500);
 
         const actualStart =
-            await startTimeInput.inputValue();
-
+            await page
+                .locator(
+                    'input[name="actionarrivaldate_time"]'
+                )
+                .inputValue();
 
         console.log(
-            "Job Start after update:",
+            "Job Start after fill:",
             actualStart
         );
-
 
         if (
             actualStart !== {start_time!r}
         ) {{
 
             throw new Error(
-                "Job Start failed. " +
+                "Job Start did not update. " +
                 "Expected '" +
                 {start_time!r} +
                 "' but got '" +
@@ -692,11 +611,6 @@ async page => {{
                 "'."
             );
         }}
-
-
-        console.log(
-            "Job Start successfully updated."
-        );
 
     }} else {{
 
@@ -706,9 +620,9 @@ async page => {{
     }}
 
 
-    // ---------------------------------------------------------
-    // JOB END
-    // ---------------------------------------------------------
+    // ========================================================
+    // END TIME
+    // ========================================================
 
     if ({end_time!r}) {{
 
@@ -717,40 +631,30 @@ async page => {{
             {end_time!r}
         );
 
-
-        await endTimeInput.click();
-
-
         await endTimeInput.fill(
             {end_time!r}
         );
 
-
-        // Blur the field so Halo receives the change.
-        await endTimeInput.press(
-            "Tab"
-        );
-
-
-        await page.waitForTimeout(750);
-
+        await page.waitForTimeout(500);
 
         const actualEnd =
-            await endTimeInput.inputValue();
-
+            await page
+                .locator(
+                    'input[name="actioncompletiondate_time"]'
+                )
+                .inputValue();
 
         console.log(
-            "Job End after update:",
+            "Job End after fill:",
             actualEnd
         );
-
 
         if (
             actualEnd !== {end_time!r}
         ) {{
 
             throw new Error(
-                "Job End failed. " +
+                "Job End did not update. " +
                 "Expected '" +
                 {end_time!r} +
                 "' but got '" +
@@ -758,11 +662,6 @@ async page => {{
                 "'."
             );
         }}
-
-
-        console.log(
-            "Job End successfully updated."
-        );
 
     }} else {{
 
@@ -772,204 +671,174 @@ async page => {{
     }}
 
 
+    // ========================================================
+    // STATUS
+    // ========================================================
+
+    console.log("");
     console.log(
-        "========================================"
+        "Setting status: {status}"
     );
 
-
-    // ---------------------------------------------------------
-    // FINAL TIME VERIFICATION
-    // ---------------------------------------------------------
-
-    console.log(
-        "Final Job Start:",
-        await startTimeInput.inputValue()
+    const statusCombobox = page.getByRole(
+        "combobox",
+        {{
+            name: "Status *"
+        }}
     );
 
+    await statusCombobox.click();
 
-    console.log(
-        "Final Job End:",
-        await endTimeInput.inputValue()
-    );
+    await page.waitForTimeout(500);
 
 
-    // ---------------------------------------------------------
+    const statusOption = page.locator(
+        ".Select__option",
+        {{
+            hasText: {status!r}
+        }}
+    ).last();
+
+
+    await statusOption.click();
+
+    await page.waitForTimeout(500);
+
+
+    // ========================================================
     // CHARGE TYPE
-    // ---------------------------------------------------------
+    // ========================================================
 
     console.log(
         "Setting charge type: {charge_type}"
     );
 
-
-    let chargeSelected = false;
-
-
-    for (
-        let attempt = 1;
-        attempt <= 3;
-        attempt++
-    ) {{
-
-        try {{
-
-            const chargeTypeCombobox =
-                page.getByRole(
-                    "combobox",
-                    {{
-                        name: "Charge Type *"
-                    }}
-                );
-
-
-            await chargeTypeCombobox.click();
-
-
-            await page.waitForTimeout(800);
-
-
-            const clicked =
-                await page.evaluate(
-                    targetText => {{
-
-                        const selectors = [
-                            ".Select__option",
-                            ".dropdown-item",
-                            '[role="option"]',
-                            "li",
-                            ".select2-results__option",
-                            ".ng-option",
-                            "div",
-                            "span"
-                        ];
-
-
-                        for (
-                            const selector
-                            of selectors
-                        ) {{
-
-                            const items =
-                                Array.from(
-                                    document.querySelectorAll(
-                                        selector
-                                    )
-                                );
-
-
-                            const match =
-                                items.find(
-                                    el =>
-                                        el.offsetParent !== null
-                                        &&
-                                        el.textContent.trim()
-                                            === targetText
-                                );
-
-
-                            if (match) {{
-
-                                match.click();
-
-                                return true;
-                            }}
-                        }}
-
-
-                        return false;
-
-                    }},
-                    {charge_type!r}
-                );
-
-
-            if (clicked) {{
-
-                chargeSelected = true;
-
-                break;
-            }}
-
-        }} catch (err) {{
-
-            console.log(
-                "Charge attempt " +
-                attempt +
-                " failed. Retrying..."
-            );
+    const chargeCombobox = page.getByRole(
+        "combobox",
+        {{
+            name: "Charge Type *"
         }}
+    );
+
+    await chargeCombobox.click();
+
+    await page.waitForTimeout(500);
 
 
-        await page.waitForTimeout(1000);
-    }}
-
-
-    if (!chargeSelected) {{
-
-        try {{
-
-            await page.keyboard.type(
-                {charge_type!r}
-            );
-
-
-            await page.keyboard.press(
-                "Enter"
-            );
-
-
-            chargeSelected = true;
-
-        }} catch (e) {{
-
-            throw new Error(
-                "Failed to select Charge Type: " +
-                {charge_type!r}
-            );
+    const chargeOption = page.locator(
+        ".Select__option",
+        {{
+            hasText: {charge_type!r}
         }}
-    }}
+    ).last();
 
 
-    await page.waitForTimeout(1000);
+    await chargeOption.click();
+
+    await page.waitForTimeout(500);
 
 
-    // ---------------------------------------------------------
-    // SAVE
-    // ---------------------------------------------------------
+    // ========================================================
+    // FINAL VERIFICATION BEFORE SAVE
+    // ========================================================
+
+    const finalStart =
+        await page
+            .locator(
+                'input[name="actionarrivaldate_time"]'
+            )
+            .inputValue();
+
+    const finalEnd =
+        await page
+            .locator(
+                'input[name="actioncompletiondate_time"]'
+            )
+            .inputValue();
+
+
+    console.log("");
+    console.log(
+        "========================================"
+    );
+    console.log(
+        "FINAL VALUES BEFORE SAVE"
+    );
+    console.log(
+        "========================================"
+    );
 
     console.log(
-        "Worklog fields populated. Saving..."
+        "Job Start:",
+        finalStart
+    );
+
+    console.log(
+        "Job End:",
+        finalEnd
     );
 
 
-    await page.evaluate(() => {{
+    if (
+        {start_time!r}
+        &&
+        finalStart !== {start_time!r}
+    ) {{
 
-        document.body.click();
-
-
-        const saveBtn =
-            Array.from(
-                document.querySelectorAll(
-                    'input[type="submit"], button'
-                )
-            ).find(
-                el =>
-                    el.value === "Save"
-                    ||
-                    el.textContent.trim() === "Save"
-            );
+        throw new Error(
+            "FINAL CHECK FAILED: Job Start is '" +
+            finalStart +
+            "' instead of '" +
+            {start_time!r} +
+            "'."
+        );
+    }}
 
 
-        if (!saveBtn) {{
+    if (
+        {end_time!r}
+        &&
+        finalEnd !== {end_time!r}
+    ) {{
 
-            throw new Error(
-                "Save button not found in DOM."
-            );
+        throw new Error(
+            "FINAL CHECK FAILED: Job End is '" +
+            finalEnd +
+            "' instead of '" +
+            {end_time!r} +
+            "'."
+        );
+    }}
+
+
+    // ========================================================
+    // SAVE
+    // ========================================================
+
+    console.log("");
+    console.log(
+        "Saving Worklog..."
+    );
+
+
+    const saveButton = page.getByRole(
+        "button",
+        {{
+            name: "Save",
+            exact: true
         }}
+    );
 
 
-        saveBtn.click();
+    await saveButton.waitFor({{
+        state: "visible",
+        timeout: 10000
     }});
+
+
+    // Use normal Playwright click rather than
+    // document.querySelector(...).click().
+    await saveButton.click();
 
 
     await page.waitForTimeout(2000);
@@ -978,12 +847,17 @@ async page => {{
     console.log(
         "Worklog saved."
     );
+
+
+    return {{
+        start: {start_time!r},
+        end: {end_time!r},
+        url: page.url()
+    }};
 }}
 """
 
-
     temp_path = None
-
 
     try:
 
@@ -1010,6 +884,7 @@ async page => {{
         run_cli(
             "run-code",
             f"--filename={temp_path}",
+            check=True
         )
 
 
@@ -1031,6 +906,10 @@ async page => {{
                 pass
 
 
+# ============================================================
+# FINAL SNAPSHOT
+# ============================================================
+
 def take_snapshot():
 
     print(
@@ -1038,9 +917,14 @@ def take_snapshot():
     )
 
     run_cli(
-        "snapshot"
+        "snapshot",
+        check=True
     )
 
+
+# ============================================================
+# MAIN
+# ============================================================
 
 def main():
 
@@ -1055,11 +939,19 @@ def main():
 
     try:
 
+        # -----------------------------------------------------
+        # ATTACH TO EXISTING EDGE SESSION
+        # -----------------------------------------------------
+
         attach()
 
 
         ticket = ""
 
+
+        # -----------------------------------------------------
+        # TICKET SELECTION
+        # -----------------------------------------------------
 
         choice = input(
             "\n[1] Enter Ticket ID manually\n"
@@ -1393,7 +1285,7 @@ def main():
 
 
         # -----------------------------------------------------
-        # RUN AUTOMATION
+        # RUN WORKLOG AUTOMATION
         # -----------------------------------------------------
 
         run_halo_automation(
