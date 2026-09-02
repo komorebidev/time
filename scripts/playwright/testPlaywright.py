@@ -243,12 +243,13 @@ def run_halo_automation(worklog_text, status, start_time, end_time, charge_type)
     start_fill_code = (
         f"""
         const startTimeInput = allInputs.nth(timeInputIndexes[0]);
-        await startTimeInput.click();
-        await startTimeInput.press("Control+A");
-        await startTimeInput.fill({start_time!r});
-        await startTimeInput.dispatchEvent("input");
-        await startTimeInput.dispatchEvent("change");
-        await startTimeInput.dispatchEvent("blur");
+        await startTimeInput.evaluate((el, val) => {{
+            el.focus();
+            el.value = val;
+            el.dispatchEvent(new Event('input', {{ bubbles: true }}));
+            el.dispatchEvent(new Event('change', {{ bubbles: true }}));
+            el.blur();
+        }}, {start_time!r});
         """
         if start_time
         else "// Start time left unchanged"
@@ -256,12 +257,13 @@ def run_halo_automation(worklog_text, status, start_time, end_time, charge_type)
     end_fill_code = (
         f"""
         const endTimeInput = allInputs.nth(timeInputIndexes[1]);
-        await endTimeInput.click();
-        await endTimeInput.press("Control+A");
-        await endTimeInput.fill({end_time!r});
-        await endTimeInput.dispatchEvent("input");
-        await endTimeInput.dispatchEvent("change");
-        await endTimeInput.dispatchEvent("blur");
+        await endTimeInput.evaluate((el, val) => {{
+            el.focus();
+            el.value = val;
+            el.dispatchEvent(new Event('input', {{ bubbles: true }}));
+            el.dispatchEvent(new Event('change', {{ bubbles: true }}));
+            el.blur();
+        }}, {end_time!r});
         """
         if end_time
         else "// End time left unchanged"
