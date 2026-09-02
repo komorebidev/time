@@ -3,13 +3,13 @@ async page => {
         'input[name="actionarrivaldate_time"]'
     );
 
-    return {
-        count: await start.count(),
-        visible: await start.isVisible(),
-        enabled: await start.isEnabled(),
-        value: await start.inputValue(),
-        id: await start.getAttribute("id"),
-        name: await start.getAttribute("name"),
-        type: await start.getAttribute("type")
-    };
+    await start.click();
+
+    return await start.evaluate(el => ({
+        value: el.value,
+        active: document.activeElement === el,
+        activeId: document.activeElement?.id,
+        activeName: document.activeElement?.getAttribute("name"),
+        activeType: document.activeElement?.type
+    }));
 }
