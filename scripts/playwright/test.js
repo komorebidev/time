@@ -18,7 +18,7 @@ async page => {
         )
     );
 
-    await start.fill("09:00");
+    await start.fill("08:59");
 
     console.log(
         "AFTER FILL:",
