@@ -3,29 +3,41 @@ async page => {
         'input[name="actionarrivaldate_time"]'
     );
 
+    const end = page.locator(
+        'input[name="actioncompletiondate_time"]'
+    );
+
+    // Set Start
     await start.fill("08:00");
 
     const afterStart = await start.inputValue();
 
-    const statusCombobox = page.getByRole(
+    // Set End
+    await end.fill("09:00");
+
+    const afterEnd = await start.inputValue();
+
+    // Open Charge Type
+    const chargeCombobox = page.getByRole(
         "combobox",
-        { name: "Status *" }
+        { name: "Charge Type *" }
     );
 
-    await statusCombobox.click();
+    await chargeCombobox.click();
 
     await page.waitForTimeout(500);
 
-    const statusOption = page.locator(
+    // Select Internal Work
+    const chargeOption = page.locator(
         '.Select__option',
-        { hasText: "Completed (On Hold)" }
+        { hasText: "Internal Work" }
     ).last();
 
-    await statusOption.click();
+    await chargeOption.click();
 
     await page.waitForTimeout(1000);
 
-    const afterStatus = await page
+    const afterCharge = await page
         .locator(
             'input[name="actionarrivaldate_time"]'
         )
@@ -33,6 +45,7 @@ async page => {
 
     return {
         afterStart,
-        afterStatus
+        afterEnd,
+        afterCharge
     };
 }
