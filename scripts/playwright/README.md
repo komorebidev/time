@@ -4,6 +4,22 @@
 * Create ticket notes by scripting
 * Run the ticketPlaywright.py
 
+## Troubleshooting
+
+* To attach to browser session
+
+```powershell
+playwright-cli --s=halo attach --extension=msedge
+```
+
+* From there, can interact with the page, simulating Playwright flow
+
+* Troubleshooting command or to show page snapshot...
+
+```powershell
+playwright-cli --s=halo snapshot
+```
+
 ## Features
 
 * Scrape assigned ticket view
