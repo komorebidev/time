@@ -1,4 +1,3 @@
-
 import os
 import sys
 import atexit
@@ -356,7 +355,6 @@ def run_halo_automation(
     end_time,
     charge_type
 ):
-
     """
     Run HaloPSA Worklog automation.
 
@@ -475,13 +473,13 @@ async page => {{
     // generic
     //   generic: Job Start
     //   generic
-    //       textbox: Date
+    //      textbox: Date
     //   textbox: Time
     //
     // generic
     //   generic: Job End
     //   generic
-    //       textbox: Date
+    //      textbox: Date
     //   textbox: Time
     // ---------------------------------------------------------
 
@@ -1055,11 +1053,9 @@ async page => {{
 }}
 """
 
-
     temp_path = None
 
     try:
-
         with tempfile.NamedTemporaryFile(
             mode="w",
             suffix=".js",
@@ -1074,20 +1070,16 @@ async page => {{
 
             temp_path = temp_file.name
 
-
         print(
             "\nRunning Halo automation..."
         )
-
 
         run_cli(
             "run-code",
             f"--filename={temp_path}",
         )
 
-
     finally:
-
         if (
             temp_path
             and os.path.exists(temp_path)
@@ -1123,14 +1115,10 @@ def main():
         "=========================="
     )
 
-
     try:
-
         attach()
 
-
         ticket = ""
-
 
         choice = input(
             "\n[1] Enter Ticket ID manually\n"
@@ -1138,11 +1126,9 @@ def main():
             "Select option [1/2]: "
         ).strip()
 
-
         if choice == "2":
 
             tickets = scrape_ticket_options()
-
 
             if tickets:
 
@@ -1150,7 +1136,6 @@ def main():
                     f"\nFound {len(tickets)} "
                     f"tickets on the current page:"
                 )
-
 
                 for idx, t in enumerate(
                     tickets,
@@ -1169,7 +1154,6 @@ def main():
                         else ""
                     )
 
-
                     print(
                         f"  [{idx}] "
                         f"{t['id']}"
@@ -1179,12 +1163,10 @@ def main():
                         f"{t['title']}"
                     )
 
-
                 sel = input(
                     "\nEnter selection number "
                     "or type a Ticket ID directly: "
                 ).strip()
-
 
                 if (
                     sel.isdigit()
@@ -1194,7 +1176,6 @@ def main():
                     ticket = tickets[
                         int(sel) - 1
                     ]["id"]
-
 
                     print(
                         f"Selected Ticket ID: {ticket}"
@@ -1211,7 +1192,6 @@ def main():
                     "parsed from this snapshot."
                 )
 
-
         while (
             not ticket
             or not ticket.isdigit()
@@ -1220,7 +1200,6 @@ def main():
             ticket = input(
                 "\nEnter Ticket Number: "
             ).strip()
-
 
             if (
                 not ticket
@@ -1234,9 +1213,7 @@ def main():
 
                 ticket = ""
 
-
         worklog_text = ""
-
 
         while not worklog_text:
 
@@ -1244,17 +1221,11 @@ def main():
                 "Worklog text (Required): "
             ).strip()
 
-
             if not worklog_text:
 
                 print(
                     "Worklog text cannot be empty."
                 )
-
-
-        // -----------------------------------------------------
-        // STATUS
-        // -----------------------------------------------------
 
         status_options = [
             "In Progress",
@@ -1262,14 +1233,11 @@ def main():
             "On Hold"
         ]
 
-
         default_status = (
             "Completed (On Hold)"
         )
 
-
         status = default_status
-
 
         while True:
 
@@ -1277,7 +1245,6 @@ def main():
                 f"Status [? for options] "
                 f"[{default_status}]: "
             ).strip()
-
 
             if status_input == "?":
 
@@ -1289,7 +1256,6 @@ def main():
                     "-" * 25
                 )
 
-
                 for idx, opt in enumerate(
                     status_options,
                     1
@@ -1299,16 +1265,13 @@ def main():
                         f"  [{idx}] {opt}"
                     )
 
-
                 print(
                     "-" * 25
                 )
 
-
                 sel = input(
                     "Select option number: "
                 ).strip()
-
 
                 if (
                     sel.isdigit()
@@ -1340,26 +1303,15 @@ def main():
 
                 break
 
-
-        // -----------------------------------------------------
-        // TIMES
-        // -----------------------------------------------------
-
         start_time = input(
             "Start time "
             "[Leave unchanged, e.g. 09:00]: "
         ).strip()
 
-
         end_time = input(
             "End time "
             "[Leave unchanged, e.g. 10:00]: "
         ).strip()
-
-
-        // -----------------------------------------------------
-        // CHARGE TYPE
-        // -----------------------------------------------------
 
         charge_options = [
             "Project Work- Managed Services",
@@ -1368,12 +1320,9 @@ def main():
             "Internal Work"
         ]
 
-
         default_charge = "Internal Work"
 
-
         charge_type = default_charge
-
 
         while True:
 
@@ -1381,7 +1330,6 @@ def main():
                 f"Charge type [? for options] "
                 f"[{default_charge}]: "
             ).strip()
-
 
             if charge_input == "?":
 
@@ -1393,7 +1341,6 @@ def main():
                     "-" * 35
                 )
 
-
                 for idx, opt in enumerate(
                     charge_options,
                     1
@@ -1403,16 +1350,13 @@ def main():
                         f"  [{idx}] {opt}"
                     )
 
-
                 print(
                     "-" * 35
                 )
 
-
                 sel = input(
                     "Select option number: "
                 ).strip()
-
 
                 if (
                     sel.isdigit()
@@ -1444,15 +1388,9 @@ def main():
 
                 break
 
-
-        // -----------------------------------------------------
-        // RUN
-        // -----------------------------------------------------
-
         goto_ticket(
             ticket
         )
-
 
         run_halo_automation(
             worklog_text,
@@ -1462,9 +1400,7 @@ def main():
             charge_type
         )
 
-
         take_snapshot()
-
 
         print()
 
@@ -1479,7 +1415,6 @@ def main():
         print(
             "================================"
         )
-
 
     except Exception as exc:
 
@@ -1498,4 +1433,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-```
