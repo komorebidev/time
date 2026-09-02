@@ -203,8 +203,8 @@ atexit.register(
 
 def attach():
     """
-    Attach playwright-cli to the existing Microsoft Edge session
-    and open the Assigned Tickets view.
+    Attach to the existing Microsoft Edge session using
+    the Playwright CLI extension.
     """
 
     print(
@@ -262,7 +262,7 @@ def goto_ticket(ticket):
 
 def parse_snapshot_tickets(snapshot_output):
     """
-    Parse playwright-cli snapshot output into ticket dictionaries.
+    Parse playwright-cli snapshot text into ticket dictionaries.
     """
 
     tickets = []
@@ -469,18 +469,19 @@ def run_halo_automation(
     charge_type
 ):
     """
-    Create and save a HaloPSA Worklog.
+    Run HaloPSA Worklog automation.
 
-    Known-good selectors discovered from the live Halo page:
+    The Job Start and Job End inputs are selected by their
+    stable HTML name attributes rather than snapshot refs,
+    generated IDs, or input indexes.
+
+    Known fields:
 
         Job Start:
-            input[name="actionarrivaldate_time"]
+        input[name="actionarrivaldate_time"]
 
         Job End:
-            input[name="actioncompletiondate_time"]
-
-    These are deliberately used instead of snapshot refs,
-    input indexes, or generated IDs.
+        input[name="actioncompletiondate_time"]
     """
 
     js_code = f"""
@@ -490,13 +491,14 @@ async page => {{
     // OPEN WORKLOG
     // ========================================================
 
-    console.log("Opening Worklog...");
+    console.log("");
+    console.log("========================================");
+    console.log("OPENING WORKLOG");
+    console.log("========================================");
 
     await page.getByRole(
         "button",
-        {{
-            name: "Worklog"
-        }}
+        {{ name: "Worklog" }}
     ).click();
 
     await page.waitForTimeout(1500);
@@ -506,7 +508,9 @@ async page => {{
     // WORKLOG TEXT
     // ========================================================
 
-    console.log("Entering worklog...");
+    console.log(
+        "Entering worklog..."
+    );
 
     const editor = page.locator(
         '[contenteditable="true"]'
@@ -523,151 +527,131 @@ async page => {{
 
 
     // ========================================================
-    // JOB START / END
+    // EXACT TIME INPUTS
     // ========================================================
 
-    console.log("");
-    console.log(
-        "========================================"
-    );
-    console.log(
-        "SETTING JOB START / JOB END"
-    );
-    console.log(
-        "========================================"
-    );
-
-
-    const startTimeInput = page.locator(
+    const start = page.locator(
         'input[name="actionarrivaldate_time"]'
     );
 
-    const endTimeInput = page.locator(
+    const end = page.locator(
         'input[name="actioncompletiondate_time"]'
     );
 
-
-    await startTimeInput.waitFor({{
+    await start.waitFor({{
         state: "visible",
         timeout: 10000
     }});
 
-    await endTimeInput.waitFor({{
+    await end.waitFor({{
         state: "visible",
         timeout: 10000
     }});
 
+
+    // ========================================================
+    // BEFORE VALUES
+    // ========================================================
+
+    console.log("");
+    console.log("========================================");
+    console.log("TIME VALUES BEFORE CHANGES");
+    console.log("========================================");
 
     console.log(
-        "Initial Job Start:",
-        await startTimeInput.inputValue()
+        "START BEFORE = [" +
+        await start.inputValue() +
+        "]"
     );
 
     console.log(
-        "Initial Job End:",
-        await endTimeInput.inputValue()
+        "END BEFORE = [" +
+        await end.inputValue() +
+        "]"
     );
 
 
     // ========================================================
-    // START TIME
+    // JOB START
     // ========================================================
 
     if ({start_time!r}) {{
 
+        console.log("");
+        console.log("========================================");
+        console.log("SETTING JOB START");
+        console.log("========================================");
+
         console.log(
-            "Setting Job Start to:",
+            "REQUESTED START = [{start_time}]"
+        );
+
+        await start.fill(
             {start_time!r}
         );
 
-        await startTimeInput.fill(
-            {start_time!r}
+        console.log(
+            "START IMMEDIATELY = [" +
+            await start.inputValue() +
+            "]"
         );
 
-        await page.waitForTimeout(500);
-
-        const actualStart =
-            await page
-                .locator(
-                    'input[name="actionarrivaldate_time"]'
-                )
-                .inputValue();
+        await page.waitForTimeout(1500);
 
         console.log(
-            "Job Start after fill:",
-            actualStart
+            "START AFTER 1.5 SEC = [" +
+            await start.inputValue() +
+            "]"
         );
-
-        if (
-            actualStart !== {start_time!r}
-        ) {{
-
-            throw new Error(
-                "Job Start did not update. " +
-                "Expected '" +
-                {start_time!r} +
-                "' but got '" +
-                actualStart +
-                "'."
-            );
-        }}
 
     }} else {{
 
         console.log(
-            "Job Start left unchanged."
+            "No Start time supplied - leaving unchanged."
         );
+
     }}
 
 
     // ========================================================
-    // END TIME
+    // JOB END
     // ========================================================
 
     if ({end_time!r}) {{
 
+        console.log("");
+        console.log("========================================");
+        console.log("SETTING JOB END");
+        console.log("========================================");
+
         console.log(
-            "Setting Job End to:",
+            "REQUESTED END = [{end_time}]"
+        );
+
+        await end.fill(
             {end_time!r}
         );
 
-        await endTimeInput.fill(
-            {end_time!r}
+        console.log(
+            "END IMMEDIATELY = [" +
+            await end.inputValue() +
+            "]"
         );
 
         await page.waitForTimeout(500);
 
-        const actualEnd =
-            await page
-                .locator(
-                    'input[name="actioncompletiondate_time"]'
-                )
-                .inputValue();
-
         console.log(
-            "Job End after fill:",
-            actualEnd
+            "END AFTER 0.5 SEC = [" +
+            await end.inputValue() +
+            "]"
         );
-
-        if (
-            actualEnd !== {end_time!r}
-        ) {{
-
-            throw new Error(
-                "Job End did not update. " +
-                "Expected '" +
-                {end_time!r} +
-                "' but got '" +
-                actualEnd +
-                "'."
-            );
-        }}
 
     }} else {{
 
         console.log(
-            "Job End left unchanged."
+            "No End time supplied - leaving unchanged."
         );
+
     }}
 
 
@@ -682,23 +666,17 @@ async page => {{
 
     const statusCombobox = page.getByRole(
         "combobox",
-        {{
-            name: "Status *"
-        }}
+        {{ name: "Status *" }}
     );
 
     await statusCombobox.click();
 
     await page.waitForTimeout(500);
 
-
     const statusOption = page.locator(
         ".Select__option",
-        {{
-            hasText: {status!r}
-        }}
+        {{ hasText: {status!r} }}
     ).last();
-
 
     await statusOption.click();
 
@@ -715,23 +693,17 @@ async page => {{
 
     const chargeCombobox = page.getByRole(
         "combobox",
-        {{
-            name: "Charge Type *"
-        }}
+        {{ name: "Charge Type *" }}
     );
 
     await chargeCombobox.click();
 
     await page.waitForTimeout(500);
 
-
     const chargeOption = page.locator(
         ".Select__option",
-        {{
-            hasText: {charge_type!r}
-        }}
+        {{ hasText: {charge_type!r} }}
     ).last();
-
 
     await chargeOption.click();
 
@@ -742,42 +714,36 @@ async page => {{
     // FINAL VERIFICATION BEFORE SAVE
     // ========================================================
 
-    const finalStart =
-        await page
-            .locator(
-                'input[name="actionarrivaldate_time"]'
-            )
-            .inputValue();
+    const finalStart = await page.locator(
+        'input[name="actionarrivaldate_time"]'
+    ).inputValue();
 
-    const finalEnd =
-        await page
-            .locator(
-                'input[name="actioncompletiondate_time"]'
-            )
-            .inputValue();
+    const finalEnd = await page.locator(
+        'input[name="actioncompletiondate_time"]'
+    ).inputValue();
 
 
     console.log("");
+    console.log("========================================");
+    console.log("FINAL VALUES BEFORE SAVE");
+    console.log("========================================");
+
     console.log(
-        "========================================"
-    );
-    console.log(
-        "FINAL VALUES BEFORE SAVE"
-    );
-    console.log(
-        "========================================"
+        "FINAL START = [" +
+        finalStart +
+        "]"
     );
 
     console.log(
-        "Job Start:",
-        finalStart
+        "FINAL END = [" +
+        finalEnd +
+        "]"
     );
 
-    console.log(
-        "Job End:",
-        finalEnd
-    );
 
+    // ========================================================
+    // SAFETY CHECK
+    // ========================================================
 
     if (
         {start_time!r}
@@ -786,12 +752,14 @@ async page => {{
     ) {{
 
         throw new Error(
-            "FINAL CHECK FAILED: Job Start is '" +
-            finalStart +
-            "' instead of '" +
+            "JOB START CHANGED BEFORE SAVE. " +
+            "Requested=[" +
             {start_time!r} +
-            "'."
+            "] Actual=[" +
+            finalStart +
+            "]"
         );
+
     }}
 
 
@@ -802,12 +770,14 @@ async page => {{
     ) {{
 
         throw new Error(
-            "FINAL CHECK FAILED: Job End is '" +
-            finalEnd +
-            "' instead of '" +
+            "JOB END CHANGED BEFORE SAVE. " +
+            "Requested=[" +
             {end_time!r} +
-            "'."
+            "] Actual=[" +
+            finalEnd +
+            "]"
         );
+
     }}
 
 
@@ -816,10 +786,9 @@ async page => {{
     // ========================================================
 
     console.log("");
-    console.log(
-        "Saving Worklog..."
-    );
-
+    console.log("========================================");
+    console.log("SAVING WORKLOG");
+    console.log("========================================");
 
     const saveButton = page.getByRole(
         "button",
@@ -829,20 +798,14 @@ async page => {{
         }}
     );
 
-
     await saveButton.waitFor({{
         state: "visible",
         timeout: 10000
     }});
 
-
-    // Use normal Playwright click rather than
-    // document.querySelector(...).click().
     await saveButton.click();
 
-
     await page.waitForTimeout(2000);
-
 
     console.log(
         "Worklog saved."
@@ -850,8 +813,8 @@ async page => {{
 
 
     return {{
-        start: {start_time!r},
-        end: {end_time!r},
+        start: finalStart,
+        end: finalEnd,
         url: page.url()
     }};
 }}
@@ -940,7 +903,7 @@ def main():
     try:
 
         # -----------------------------------------------------
-        # ATTACH TO EXISTING EDGE SESSION
+        # ATTACH TO EDGE
         # -----------------------------------------------------
 
         attach()
@@ -1025,6 +988,7 @@ def main():
                 else:
 
                     ticket = sel
+
 
             else:
 
@@ -1154,11 +1118,13 @@ def main():
                         "Try again or enter custom text."
                     )
 
+
             elif not status_input:
 
                 status = default_status
 
                 break
+
 
             else:
 
@@ -1262,11 +1228,13 @@ def main():
                         "Try again or enter custom text."
                     )
 
+
             elif not charge_input:
 
                 charge_type = default_charge
 
                 break
+
 
             else:
 
@@ -1276,7 +1244,7 @@ def main():
 
 
         # -----------------------------------------------------
-        # NAVIGATE TO TICKET
+        # OPEN TICKET
         # -----------------------------------------------------
 
         goto_ticket(
@@ -1285,7 +1253,7 @@ def main():
 
 
         # -----------------------------------------------------
-        # RUN WORKLOG AUTOMATION
+        # RUN AUTOMATION
         # -----------------------------------------------------
 
         run_halo_automation(
