@@ -1,5 +1,15 @@
 async page => {
 
+    console.log("STEP 1: Opening Worklog");
+
+    await page.getByRole(
+        "button",
+        { name: "Worklog" }
+    ).click();
+
+    await page.waitForTimeout(1500);
+
+
     const start = page.locator(
         'input[name="actionarrivaldate_time"]'
     );
@@ -8,36 +18,58 @@ async page => {
         'input[name="actioncompletiondate_time"]'
     );
 
-    // Set known values
-    await start.fill("08:00");
-    await end.fill("09:00");
 
-    // Verify immediately before save
-    const beforeSave = {
+    console.log("STEP 2: Reading freshly opened values");
+
+    const afterOpen = {
         start: await start.inputValue(),
         end: await end.inputValue()
     };
 
-    console.log("BEFORE SAVE:", beforeSave);
 
-    // Save
-    const saveButton = page.getByRole(
-        "button",
-        {
-            name: "Save",
-            exact: true
-        }
+    console.log(
+        "AFTER OPEN:",
+        JSON.stringify(afterOpen)
     );
 
-    await saveButton.click();
 
-    // Give Halo time to process the save
-    await page.waitForTimeout(2000);
+    console.log("STEP 3: Setting Start ONLY");
 
-    console.log("URL:", page.url());
+    await start.click();
+
+    await start.fill("08:00");
+
+
+    const afterStart = {
+        start: await start.inputValue(),
+        end: await end.inputValue()
+    };
+
+
+    console.log(
+        "AFTER START:",
+        JSON.stringify(afterStart)
+    );
+
+
+    await page.waitForTimeout(1500);
+
+
+    const afterWait = {
+        start: await start.inputValue(),
+        end: await end.inputValue()
+    };
+
+
+    console.log(
+        "AFTER WAIT:",
+        JSON.stringify(afterWait)
+    );
+
 
     return {
-        beforeSave,
-        urlAfterSave: page.url()
+        afterOpen,
+        afterStart,
+        afterWait
     };
 }
