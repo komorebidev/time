@@ -3,13 +3,44 @@ async page => {
         'input[name="actionarrivaldate_time"]'
     );
 
+    const before = await start.inputValue();
+
+    console.log("BEFORE:", before);
+
     await start.click();
 
-    return await start.evaluate(el => ({
-        value: el.value,
-        active: document.activeElement === el,
-        activeId: document.activeElement?.id,
-        activeName: document.activeElement?.getAttribute("name"),
-        activeType: document.activeElement?.type
-    }));
+    console.log(
+        "AFTER CLICK:",
+        await start.inputValue(),
+        "focused:",
+        await start.evaluate(
+            el => document.activeElement === el
+        )
+    );
+
+    await start.fill("08:00");
+
+    console.log(
+        "AFTER FILL:",
+        await start.inputValue()
+    );
+
+    await page.waitForTimeout(100);
+
+    console.log(
+        "AFTER 100MS:",
+        await start.inputValue()
+    );
+
+    await page.waitForTimeout(1500);
+
+    console.log(
+        "AFTER 1.5 SEC:",
+        await start.inputValue()
+    );
+
+    return {
+        before,
+        afterFill: await start.inputValue()
+    };
 }
