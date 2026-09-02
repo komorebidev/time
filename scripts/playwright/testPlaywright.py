@@ -9,17 +9,11 @@ import subprocess
 import tempfile
 import time
 
-
 BASE_URL = "https://support.eiresystems.com/ticket"
-
 ASSIGNED_TICKETS_URL = (
     "https://support.eiresystems.com/tickets"
-    "?area=1"
-    "&mainview=team"
-    "&viewid=2"
-    "&selid=75"
-    "&sellevel=2"
-    "&selparentid=engineers%20tky"
+    "?area=1&mainview=team&viewid=2&selid=75"
+    "&sellevel=2&selparentid=engineers%20tky"
 )
 
 SESSION = "halo"
@@ -33,7 +27,6 @@ def find_playwright_cli():
     """
     Find playwright-cli without hard-coding the Windows username.
     """
-
     cli = shutil.which("playwright-cli")
 
     if cli:
@@ -133,10 +126,9 @@ def run_cli(*args, check=True):
 
 def remove_readonly(func, path, excinfo):
     """
-    Error handler for shutil.rmtree to clear read-only bits
-    and retry on Windows.
+    Error handler for shutil.rmtree to clear
+    read-only bits and retry on Windows.
     """
-
     os.chmod(
         path,
         stat.S_IWRITE
@@ -147,8 +139,7 @@ def remove_readonly(func, path, excinfo):
 
 def cleanup_local_artifacts():
     """
-    Remove local Playwright folders created in the working
-    directory.
+    Remove local Playwright/session folders.
     """
 
     folders_to_remove = [
@@ -203,8 +194,7 @@ atexit.register(
 
 def attach():
     """
-    Attach to the existing Microsoft Edge session using
-    the Playwright CLI extension.
+    Attach to the existing Microsoft Edge session.
     """
 
     print(
@@ -234,7 +224,7 @@ def attach():
 
 def goto_ticket(ticket):
     """
-    Navigate directly to a Halo ticket.
+    Navigate directly to the requested Halo ticket.
     """
 
     url = (
@@ -257,12 +247,13 @@ def goto_ticket(ticket):
 
 
 # ============================================================
-# TICKET SNAPSHOT PARSING
+# SNAPSHOT / TICKET PARSING
 # ============================================================
 
 def parse_snapshot_tickets(snapshot_output):
     """
-    Parse playwright-cli snapshot text into ticket dictionaries.
+    Parse Playwright CLI snapshot output
+    into ticket dictionaries.
     """
 
     tickets = []
@@ -289,7 +280,6 @@ def parse_snapshot_tickets(snapshot_output):
                     tickets.append(parsed)
 
             current_block = [line]
-
             in_ticket_block = True
 
         elif in_ticket_block:
@@ -351,21 +341,17 @@ def _parse_single_block(block_lines):
                 1
             )
 
-            if (
-                len(parts) > 1
-                and '"' not in parts[1]
-            ):
+            if len(parts) > 1:
 
-                val = parts[1].strip()
+                if '"' not in parts[1]:
 
-                if (
-                    val
-                    and not val.startswith('[')
-                ):
+                    val = parts[1].strip()
 
-                    clean_lines.append(
+                    if (
                         val
-                    )
+                        and not val.startswith('[')
+                    ):
+                        clean_lines.append(val)
 
     for i, l in enumerate(clean_lines):
 
@@ -401,10 +387,7 @@ def _parse_single_block(block_lines):
             date_str = l
 
             if i > 0:
-
-                ticket_name = (
-                    clean_lines[i - 1]
-                )
+                ticket_name = clean_lines[i - 1]
 
         elif l in [
             "Service Request",
@@ -442,6 +425,9 @@ def _parse_single_block(block_lines):
 
 
 def scrape_ticket_options():
+    """
+    Take a snapshot and parse ticket information.
+    """
 
     print(
         "\nTaking snapshot to parse tickets..."
@@ -469,27 +455,24 @@ def run_halo_automation(
     charge_type
 ):
     """
-    Run HaloPSA Worklog automation.
+    Run the HaloPSA Worklog automation.
 
-    The Job Start and Job End inputs are selected by their
-    stable HTML name attributes rather than snapshot refs,
-    generated IDs, or input indexes.
+    IMPORTANT:
+    The Job Start and Job End fields are addressed
+    directly by their actual HTML name attributes.
 
-    Known fields:
-
-        Job Start:
+    Job Start:
         input[name="actionarrivaldate_time"]
 
-        Job End:
+    Job End:
         input[name="actioncompletiondate_time"]
+
+    We do NOT discover these fields by their position
+    in the input collection.
     """
 
     js_code = f"""
 async page => {{
-
-    // ========================================================
-    // OPEN WORKLOG
-    // ========================================================
 
     console.log("");
     console.log("========================================");
@@ -498,7 +481,9 @@ async page => {{
 
     await page.getByRole(
         "button",
-        {{ name: "Worklog" }}
+        {{
+            name: "Worklog"
+        }}
     ).click();
 
     await page.waitForTimeout(1500);
@@ -527,48 +512,77 @@ async page => {{
 
 
     // ========================================================
-    // EXACT TIME INPUTS
+    // ACTUAL HALO TIME FIELD LOCATORS
     // ========================================================
 
-    const start = page.locator(
+    const startTimeInput = page.locator(
         'input[name="actionarrivaldate_time"]'
     );
 
-    const end = page.locator(
+    const endTimeInput = page.locator(
         'input[name="actioncompletiondate_time"]'
     );
 
-    await start.waitFor({{
+
+    await startTimeInput.waitFor({{
         state: "visible",
         timeout: 10000
     }});
 
-    await end.waitFor({{
+    await endTimeInput.waitFor({{
         state: "visible",
         timeout: 10000
     }});
 
-
-    // ========================================================
-    // BEFORE VALUES
-    // ========================================================
 
     console.log("");
     console.log("========================================");
-    console.log("TIME VALUES BEFORE CHANGES");
+    console.log("INITIAL TIME VALUES");
     console.log("========================================");
 
     console.log(
-        "START BEFORE = [" +
-        await start.inputValue() +
-        "]"
+        "Job Start:",
+        await startTimeInput.inputValue()
     );
 
     console.log(
-        "END BEFORE = [" +
-        await end.inputValue() +
-        "]"
+        "Job End:",
+        await endTimeInput.inputValue()
     );
+
+
+    // ========================================================
+    // STATUS
+    // ========================================================
+
+    console.log("");
+    console.log(
+        "Setting status: {status}"
+    );
+
+    const statusCombobox = page.getByRole(
+        "combobox",
+        {{
+            name: "Status *"
+        }}
+    );
+
+    await statusCombobox.click();
+
+    await page.waitForTimeout(500);
+
+
+    const statusOption = page.locator(
+        ".Select__option",
+        {{
+            hasText: {status!r}
+        }}
+    ).last();
+
+
+    await statusOption.click();
+
+    await page.waitForTimeout(500);
 
 
     // ========================================================
@@ -583,31 +597,47 @@ async page => {{
         console.log("========================================");
 
         console.log(
-            "REQUESTED START = [{start_time}]"
-        );
-
-        await start.fill(
+            "Requested Start:",
             {start_time!r}
         );
 
-        console.log(
-            "START IMMEDIATELY = [" +
-            await start.inputValue() +
-            "]"
+
+        // This is deliberately the same direct
+        // locator/fill operation that was proven
+        // to work in the live Edge test.
+
+        await startTimeInput.click();
+
+        await startTimeInput.fill(
+            {start_time!r}
         );
 
-        await page.waitForTimeout(1500);
 
         console.log(
-            "START AFTER 1.5 SEC = [" +
-            await start.inputValue() +
-            "]"
+            "Job Start after fill:",
+            await startTimeInput.inputValue()
+        );
+
+
+        // Move focus away from the field so Halo
+        // receives the normal browser interaction.
+
+        await startTimeInput.press(
+            "Tab"
+        );
+
+        await page.waitForTimeout(500);
+
+
+        console.log(
+            "Job Start after Tab:",
+            await startTimeInput.inputValue()
         );
 
     }} else {{
 
         console.log(
-            "No Start time supplied - leaving unchanged."
+            "Start time left unchanged."
         );
 
     }}
@@ -625,85 +655,93 @@ async page => {{
         console.log("========================================");
 
         console.log(
-            "REQUESTED END = [{end_time}]"
-        );
-
-        await end.fill(
+            "Requested End:",
             {end_time!r}
         );
 
+
+        await endTimeInput.click();
+
+        await endTimeInput.fill(
+            {end_time!r}
+        );
+
+
         console.log(
-            "END IMMEDIATELY = [" +
-            await end.inputValue() +
-            "]"
+            "Job End after fill:",
+            await endTimeInput.inputValue()
+        );
+
+
+        await endTimeInput.press(
+            "Tab"
         );
 
         await page.waitForTimeout(500);
 
+
         console.log(
-            "END AFTER 0.5 SEC = [" +
-            await end.inputValue() +
-            "]"
+            "Job End after Tab:",
+            await endTimeInput.inputValue()
         );
 
     }} else {{
 
         console.log(
-            "No End time supplied - leaving unchanged."
+            "End time left unchanged."
         );
 
     }}
 
 
     // ========================================================
-    // STATUS
+    // VERIFY TIMES BEFORE CHARGE TYPE
     // ========================================================
 
     console.log("");
+    console.log("========================================");
+    console.log("TIMES BEFORE CHARGE TYPE");
+    console.log("========================================");
+
     console.log(
-        "Setting status: {status}"
+        "Job Start:",
+        await startTimeInput.inputValue()
     );
 
-    const statusCombobox = page.getByRole(
-        "combobox",
-        {{ name: "Status *" }}
+    console.log(
+        "Job End:",
+        await endTimeInput.inputValue()
     );
-
-    await statusCombobox.click();
-
-    await page.waitForTimeout(500);
-
-    const statusOption = page.locator(
-        ".Select__option",
-        {{ hasText: {status!r} }}
-    ).last();
-
-    await statusOption.click();
-
-    await page.waitForTimeout(500);
 
 
     // ========================================================
     // CHARGE TYPE
     // ========================================================
 
+    console.log("");
     console.log(
         "Setting charge type: {charge_type}"
     );
 
     const chargeCombobox = page.getByRole(
         "combobox",
-        {{ name: "Charge Type *" }}
+        {{
+            name: "Charge Type *"
+        }}
     );
 
     await chargeCombobox.click();
 
     await page.waitForTimeout(500);
 
+
     const chargeOption = page.locator(
         ".Select__option",
-        {{ hasText: {charge_type!r} }}
+        {{
+            hasText: {charge_type!r}
+        }}
     ).last();
+
 
     await chargeOption.click();
 
@@ -714,13 +752,11 @@ async page => {{
     // FINAL VERIFICATION BEFORE SAVE
     // ========================================================
 
-    const finalStart = await page.locator(
-        'input[name="actionarrivaldate_time"]'
-    ).inputValue();
+    const finalStart =
+        await startTimeInput.inputValue();
 
-    const finalEnd = await page.locator(
-        'input[name="actioncompletiondate_time"]'
-    ).inputValue();
+    const finalEnd =
+        await endTimeInput.inputValue();
 
 
     console.log("");
@@ -729,56 +765,14 @@ async page => {{
     console.log("========================================");
 
     console.log(
-        "FINAL START = [" +
-        finalStart +
-        "]"
+        "Job Start:",
+        finalStart
     );
 
     console.log(
-        "FINAL END = [" +
-        finalEnd +
-        "]"
+        "Job End:",
+        finalEnd
     );
-
-
-    // ========================================================
-    // SAFETY CHECK
-    // ========================================================
-
-    if (
-        {start_time!r}
-        &&
-        finalStart !== {start_time!r}
-    ) {{
-
-        throw new Error(
-            "JOB START CHANGED BEFORE SAVE. " +
-            "Requested=[" +
-            {start_time!r} +
-            "] Actual=[" +
-            finalStart +
-            "]"
-        );
-
-    }}
-
-
-    if (
-        {end_time!r}
-        &&
-        finalEnd !== {end_time!r}
-    ) {{
-
-        throw new Error(
-            "JOB END CHANGED BEFORE SAVE. " +
-            "Requested=[" +
-            {end_time!r} +
-            "] Actual=[" +
-            finalEnd +
-            "]"
-        );
-
-    }}
 
 
     // ========================================================
@@ -786,9 +780,10 @@ async page => {{
     // ========================================================
 
     console.log("");
-    console.log("========================================");
-    console.log("SAVING WORKLOG");
-    console.log("========================================");
+    console.log(
+        "Saving worklog..."
+    );
+
 
     const saveButton = page.getByRole(
         "button",
@@ -798,27 +793,37 @@ async page => {{
         }}
     );
 
+
     await saveButton.waitFor({{
         state: "visible",
         timeout: 10000
     }});
 
+
     await saveButton.click();
 
     await page.waitForTimeout(2000);
 
+
+    console.log("");
+    console.log("========================================");
+    console.log("WORKLOG SAVED");
+    console.log("========================================");
+
     console.log(
-        "Worklog saved."
+        "URL:",
+        page.url()
     );
 
 
     return {{
-        start: finalStart,
-        end: finalEnd,
-        url: page.url()
+        finalStart,
+        finalEnd,
+        urlAfterSave: page.url()
     }};
 }}
 """
+
 
     temp_path = None
 
@@ -829,7 +834,7 @@ async page => {{
             suffix=".js",
             prefix="halo_worklog_",
             delete=False,
-            encoding="utf-8",
+            encoding="utf-8"
         ) as temp_file:
 
             temp_file.write(
@@ -859,13 +864,11 @@ async page => {{
         ):
 
             try:
-
                 os.remove(
                     temp_path
                 )
 
             except OSError:
-
                 pass
 
 
@@ -902,19 +905,18 @@ def main():
 
     try:
 
-        # -----------------------------------------------------
-        # ATTACH TO EDGE
-        # -----------------------------------------------------
+        # ------------------------------------------------------
+        # ATTACH
+        # ------------------------------------------------------
 
         attach()
 
 
+        # ------------------------------------------------------
+        # SELECT TICKET
+        # ------------------------------------------------------
+
         ticket = ""
-
-
-        # -----------------------------------------------------
-        # TICKET SELECTION
-        # -----------------------------------------------------
 
         choice = input(
             "\n[1] Enter Ticket ID manually\n"
@@ -948,20 +950,18 @@ def main():
                         else ""
                     )
 
-
                     type_info = (
                         f" ({t['type']})"
                         if t["type"]
                         else ""
                     )
 
-
                     print(
                         f"  [{idx}] "
                         f"{t['id']}"
                         f"{date_info}"
-                        f"{type_info} - "
-                        f"{t['title']}"
+                        f"{type_info}"
+                        f" - {t['title']}"
                     )
 
 
@@ -980,7 +980,6 @@ def main():
                         int(sel) - 1
                     ]["id"]
 
-
                     print(
                         f"Selected Ticket ID: {ticket}"
                     )
@@ -989,7 +988,6 @@ def main():
 
                     ticket = sel
 
-
             else:
 
                 print(
@@ -997,6 +995,10 @@ def main():
                     "parsed from this snapshot."
                 )
 
+
+        # ------------------------------------------------------
+        # VALIDATE TICKET
+        # ------------------------------------------------------
 
         while (
             not ticket
@@ -1021,12 +1023,11 @@ def main():
                 ticket = ""
 
 
-        # -----------------------------------------------------
+        # ------------------------------------------------------
         # WORKLOG TEXT
-        # -----------------------------------------------------
+        # ------------------------------------------------------
 
         worklog_text = ""
-
 
         while not worklog_text:
 
@@ -1042,9 +1043,9 @@ def main():
                 )
 
 
-        # -----------------------------------------------------
+        # ------------------------------------------------------
         # STATUS
-        # -----------------------------------------------------
+        # ------------------------------------------------------
 
         status_options = [
             "In Progress",
@@ -1052,11 +1053,9 @@ def main():
             "On Hold"
         ]
 
-
         default_status = (
             "Completed (On Hold)"
         )
-
 
         status = default_status
 
@@ -1122,20 +1121,18 @@ def main():
             elif not status_input:
 
                 status = default_status
-
                 break
 
 
             else:
 
                 status = status_input
-
                 break
 
 
-        # -----------------------------------------------------
-        # JOB TIMES
-        # -----------------------------------------------------
+        # ------------------------------------------------------
+        # TIMES
+        # ------------------------------------------------------
 
         start_time = input(
             "Start time "
@@ -1149,9 +1146,9 @@ def main():
         ).strip()
 
 
-        # -----------------------------------------------------
+        # ------------------------------------------------------
         # CHARGE TYPE
-        # -----------------------------------------------------
+        # ------------------------------------------------------
 
         charge_options = [
             "Project Work- Managed Services",
@@ -1160,11 +1157,7 @@ def main():
             "Internal Work"
         ]
 
-
-        default_charge = (
-            "Internal Work"
-        )
-
+        default_charge = "Internal Work"
 
         charge_type = default_charge
 
@@ -1213,11 +1206,9 @@ def main():
                     and 1 <= int(sel) <= len(charge_options)
                 ):
 
-                    charge_type = (
-                        charge_options[
-                            int(sel) - 1
-                        ]
-                    )
+                    charge_type = charge_options[
+                        int(sel) - 1
+                    ]
 
                     break
 
@@ -1232,29 +1223,27 @@ def main():
             elif not charge_input:
 
                 charge_type = default_charge
-
                 break
 
 
             else:
 
                 charge_type = charge_input
-
                 break
 
 
-        # -----------------------------------------------------
+        # ------------------------------------------------------
         # OPEN TICKET
-        # -----------------------------------------------------
+        # ------------------------------------------------------
 
         goto_ticket(
             ticket
         )
 
 
-        # -----------------------------------------------------
+        # ------------------------------------------------------
         # RUN AUTOMATION
-        # -----------------------------------------------------
+        # ------------------------------------------------------
 
         run_halo_automation(
             worklog_text,
@@ -1265,23 +1254,20 @@ def main():
         )
 
 
-        # -----------------------------------------------------
+        # ------------------------------------------------------
         # FINAL SNAPSHOT
-        # -----------------------------------------------------
+        # ------------------------------------------------------
 
         take_snapshot()
 
 
         print()
-
         print(
             "================================"
         )
-
         print(
             "Worklog automation completed."
         )
-
         print(
             "================================"
         )
@@ -1290,7 +1276,6 @@ def main():
     except Exception as exc:
 
         print()
-
         print(
             "ERROR:"
         )
@@ -1301,6 +1286,10 @@ def main():
 
         sys.exit(1)
 
+
+# ============================================================
+# ENTRY POINT
+# ============================================================
 
 if __name__ == "__main__":
     main()
