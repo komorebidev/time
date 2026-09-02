@@ -3,19 +3,32 @@ async page => {
         'input[name="actionarrivaldate_time"]'
     );
 
-    const before = await start.inputValue();
-
     await start.fill("08:00");
 
-    const immediately = await start.inputValue();
+    const afterStart = await start.inputValue();
 
-    await page.waitForTimeout(1500);
+    const statusCombobox = page.getByRole(
+        "combobox",
+        { name: "Status *" }
+    );
 
-    const after = await start.inputValue();
+    await statusCombobox.click();
+
+    await page.waitForTimeout(500);
+
+    await page.getByText(
+        "Completed (On Hold)",
+        { exact: true }
+    ).click();
+
+    await page.waitForTimeout(1000);
+
+    const afterStatus = await page
+        .locator('input[name="actionarrivaldate_time"]')
+        .inputValue();
 
     return {
-        before,
-        immediately,
-        after
+        afterStart,
+        afterStatus
     };
 }
