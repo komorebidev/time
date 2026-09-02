@@ -7,6 +7,7 @@ import shutil
 import stat
 import subprocess
 import tempfile
+import textwrap
 import time
 
 
@@ -14,8 +15,12 @@ BASE_URL = "https://support.eiresystems.com/ticket"
 
 ASSIGNED_TICKETS_URL = (
     "https://support.eiresystems.com/tickets"
-    "?area=1&mainview=team&viewid=2&selid=75"
-    "&sellevel=2&selparentid=engineers%20tky"
+    "?area=1"
+    "&mainview=team"
+    "&viewid=2"
+    "&selid=75"
+    "&sellevel=2"
+    "&selparentid=engineers%20tky"
 )
 
 SESSION = "halo"
@@ -29,7 +34,6 @@ def find_playwright_cli():
     """
     Find playwright-cli without hard-coding the Windows username.
     """
-
     cli = shutil.which("playwright-cli")
 
     if cli:
@@ -50,61 +54,41 @@ CLI = find_playwright_cli()
 
 def run_cli(*args, check=True):
     """
-    Run playwright-cli safely.
-
-    IMPORTANT:
-    On Windows, URLs contain '&' characters.
-
-    Using shell=True directly causes cmd.exe to interpret '&'
-    as a command separator.
-
-    This implementation avoids shell=True and passes the complete
-    command safely through cmd.exe.
+    Run playwright-cli safely across platforms.
     """
 
     if platform.system() == "Windows":
 
-        command_parts = [
-            CLI,
-            f"--s={SESSION}",
-            *[str(arg) for arg in args]
-        ]
+        quoted_args = []
 
-        def quote_cmd_arg(value):
-            value = str(value)
-            value = value.replace('"', '\\"')
-            return f'"{value}"'
+        for arg in args:
 
-        cmd_line = " ".join(
-            quote_cmd_arg(part)
-            for part in command_parts
+            s = str(arg)
+
+            if not (
+                s.startswith('"')
+                and s.endswith('"')
+            ):
+                s = f'"{s}"'
+
+            quoted_args.append(s)
+
+        cmd_str = (
+            f'"{CLI}" "--s={SESSION}" '
+            + " ".join(quoted_args)
         )
-
-        cmd = [
-            "cmd.exe",
-            "/d",
-            "/s",
-            "/c",
-            cmd_line
-        ]
 
         print()
-        print(
-            "> "
-            + " ".join(
-                quote_cmd_arg(part)
-                for part in command_parts
-            )
-        )
+        print("> " + cmd_str)
 
         result = subprocess.run(
-            cmd,
+            cmd_str,
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
             text=True,
             encoding="utf-8",
             errors="replace",
-            shell=False,
+            shell=True,
         )
 
     else:
@@ -116,10 +100,7 @@ def run_cli(*args, check=True):
         ]
 
         print()
-        print(
-            "> "
-            + " ".join(command)
-        )
+        print("> " + " ".join(command))
 
         result = subprocess.run(
             command,
@@ -152,26 +133,19 @@ def run_cli(*args, check=True):
 
 def remove_readonly(func, path, excinfo):
     """
-    Clear read-only attributes before deleting files on Windows.
+    Error handler for shutil.rmtree on Windows.
     """
+    os.chmod(
+        path,
+        stat.S_IWRITE
+    )
 
-    try:
-        os.chmod(
-            path,
-            stat.S_IWRITE
-        )
-    except Exception:
-        pass
-
-    try:
-        func(path)
-    except Exception:
-        pass
+    func(path)
 
 
 def cleanup_local_artifacts():
     """
-    Remove local Playwright CLI folders.
+    Remove local Playwright/session folders.
     """
 
     folders_to_remove = [
@@ -221,17 +195,65 @@ atexit.register(
 
 
 # ============================================================
+# INPUT VALIDATION
+# ============================================================
+
+def normalize_time(value, field_name):
+    """
+    Validate and normalize HH:MM input.
+
+    Accepts:
+        08:00
+        8:00
+
+    Returns:
+        08:00
+
+    Empty input means leave unchanged.
+    """
+
+    value = value.strip()
+
+    if not value:
+        return ""
+
+    match = re.fullmatch(
+        r"(\d{1,2}):(\d{2})",
+        value
+    )
+
+    if not match:
+        raise ValueError(
+            f"{field_name} must be HH:MM, e.g. 08:00"
+        )
+
+    hour = int(match.group(1))
+    minute = int(match.group(2))
+
+    if hour < 0 or hour > 23:
+        raise ValueError(
+            f"{field_name} hour must be between 00 and 23."
+        )
+
+    if minute < 0 or minute > 59:
+        raise ValueError(
+            f"{field_name} minute must be between 00 and 59."
+        )
+
+    return f"{hour:02d}:{minute:02d}"
+
+
+# ============================================================
 # EDGE / NAVIGATION
 # ============================================================
 
 def attach():
     """
-    Attach to the existing Microsoft Edge session.
+    Attach playwright-cli to the existing Microsoft Edge session.
     """
 
-    print()
     print(
-        "Attaching to Microsoft Edge..."
+        "\nAttaching to Microsoft Edge..."
     )
 
     run_cli(
@@ -242,9 +264,8 @@ def attach():
 
     time.sleep(1)
 
-    print()
     print(
-        "Opening Assigned Tickets view..."
+        "\nOpening Assigned Tickets view..."
     )
 
     run_cli(
@@ -267,9 +288,8 @@ def goto_ticket(ticket):
         f"&showalltickettypes=1"
     )
 
-    print()
     print(
-        f"Opening ticket {ticket}..."
+        f"\nOpening ticket {ticket}..."
     )
 
     run_cli(
@@ -287,7 +307,8 @@ def goto_ticket(ticket):
 
 def parse_snapshot_tickets(snapshot_output):
     """
-    Parse Playwright CLI snapshot output into ticket dictionaries.
+    Parse Playwright CLI snapshot output
+    into ticket dictionaries.
     """
 
     tickets = []
@@ -386,9 +407,7 @@ def _parse_single_block(block_lines):
                         and not val.startswith('[')
                     ):
 
-                        clean_lines.append(
-                            val
-                        )
+                        clean_lines.append(val)
 
     for i, l in enumerate(clean_lines):
 
@@ -424,7 +443,10 @@ def _parse_single_block(block_lines):
             date_str = l
 
             if i > 0:
-                ticket_name = clean_lines[i - 1]
+
+                ticket_name = clean_lines[
+                    i - 1
+                ]
 
         elif l in [
             "Service Request",
@@ -463,9 +485,8 @@ def _parse_single_block(block_lines):
 
 def scrape_ticket_options():
 
-    print()
     print(
-        "Taking snapshot to parse tickets..."
+        "\nTaking snapshot to parse tickets..."
     )
 
     output = run_cli(
@@ -490,573 +511,522 @@ def run_halo_automation(
     charge_type
 ):
     """
-    Run the HaloPSA Worklog automation.
+    Run HaloPSA Worklog automation.
 
-    JOB START IS INTENTIONALLY THE FIRST FIELD TO BE TOUCHED.
+    IMPORTANT ORDER:
 
-    Order:
+    1. Open Worklog
+    2. Find Job Start
+    3. Click Job Start
+    4. Fill Job Start
+    5. Verify Job Start
+    6. Continue with remaining fields
 
-        1. Open Worklog
-        2. Find Job Start
-        3. Click Job Start
-        4. Fill Job Start
-        5. Worklog text
-        6. Status
-        7. Job End
-        8. Charge Type
-        9. Save
+    Job Start:
+        input[name="actionarrivaldate_time"]
 
-    Actual Halo HTML names:
+    Job End:
+        input[name="actioncompletiondate_time"]
 
-        Job Start:
-            actionarrivaldate_time
-
-        Job End:
-            actioncompletiondate_time
+    We deliberately DO NOT identify these fields
+    by their position among all inputs.
     """
 
-    js_code = f"""
-async page => {{
+    js_code = textwrap.dedent(
+        f"""
+        async page => {{
 
-    console.log("");
-    console.log("========================================");
-    console.log("HALO WORKLOG AUTOMATION");
-    console.log("========================================");
-
-
-    // ========================================================
-    // 1. OPEN WORKLOG
-    // ========================================================
-
-    console.log("");
-    console.log("STEP 1: Opening Worklog...");
-
-    await page.getByRole(
-        "button",
-        {{
-            name: "Worklog"
-        }}
-    ).click();
-
-    await page.waitForTimeout(1500);
+            console.log("");
+            console.log("========================================");
+            console.log("HALO WORKLOG AUTOMATION");
+            console.log("========================================");
 
 
-    // ========================================================
-    // 2. FIND JOB START
-    // ========================================================
+            // ====================================================
+            // 1. OPEN WORKLOG
+            // ====================================================
 
-    console.log("");
-    console.log("STEP 2: Finding Job Start...");
+            console.log("");
+            console.log("STEP 1: Opening Worklog...");
 
-    const startTimeInput = page.locator(
-        'input[name="actionarrivaldate_time"]'
-    );
-
-
-    // Confirm that exactly one Job Start exists.
-
-    const startCount =
-        await startTimeInput.count();
-
-    console.log(
-        "Job Start element count:",
-        startCount
-    );
-
-    if (startCount !== 1) {{
-        throw new Error(
-            "Expected exactly one Job Start input, found "
-            + startCount
-        );
-    }}
-
-
-    await startTimeInput.waitFor({{
-        state: "visible",
-        timeout: 10000
-    }});
-
-
-    if (!await startTimeInput.isEnabled()) {{
-        throw new Error(
-            "Job Start input is visible but disabled."
-        );
-    }}
-
-
-    console.log(
-        "Job Start located."
-    );
-
-    console.log(
-        "Job Start current value:",
-        await startTimeInput.inputValue()
-    );
-
-    console.log(
-        "Job Start id:",
-        await startTimeInput.getAttribute("id")
-    );
-
-    console.log(
-        "Job Start name:",
-        await startTimeInput.getAttribute("name")
-    );
-
-
-    // ========================================================
-    // 3. CLICK JOB START
-    // ========================================================
-
-    console.log("");
-    console.log("STEP 3: Clicking Job Start...");
-
-    await startTimeInput.click();
-
-    await page.waitForTimeout(100);
-
-
-    const startFocused =
-        await startTimeInput.evaluate(
-            el => document.activeElement === el
-        );
-
-
-    console.log(
-        "Job Start focused:",
-        startFocused
-    );
-
-
-    if (!startFocused) {{
-
-        console.log(
-            "Normal click did not leave Job Start focused."
-        );
-
-        // Try the exact DOM element directly.
-        await startTimeInput.evaluate(
-            el => el.focus()
-        );
-
-        await page.waitForTimeout(100);
-    }}
-
-
-    console.log(
-        "Active element:",
-        await page.evaluate(
-            () => ({{
-                id: document.activeElement?.id || null,
-                name:
-                    document.activeElement
-                    ?.getAttribute("name") || null,
-                type:
-                    document.activeElement?.type || null
-            }})
-        )
-    );
-
-
-    // ========================================================
-    // 4. FILL JOB START
-    // ========================================================
-
-    if ({start_time!r}) {{
-
-        console.log("");
-        console.log("STEP 4: Filling Job Start...");
-
-        console.log(
-            "Requested Job Start:",
-            {start_time!r}
-        );
-
-
-        // IMPORTANT:
-        // This is the same locator + click + fill sequence
-        // that was proven to work in the live Edge test.
-
-        await startTimeInput.click();
-
-        await startTimeInput.fill(
-            {start_time!r}
-        );
-
-
-        const startAfterFill =
-            await startTimeInput.inputValue();
-
-
-        console.log(
-            "Job Start after fill:",
-            startAfterFill
-        );
-
-
-        if (startAfterFill !== {start_time!r}) {{
-
-            throw new Error(
-                "Job Start did not accept requested value. "
-                + "Expected: "
-                + {start_time!r}
-                + " Actual: "
-                + startAfterFill
+            const worklogButton = page.getByRole(
+                "button",
+                {{
+                    name: "Worklog"
+                }}
             );
-        }}
+
+            await worklogButton.waitFor({{
+                state: "visible",
+                timeout: 10000
+            }});
+
+            await worklogButton.click();
+
+            await page.waitForTimeout(1500);
 
 
-        await page.waitForTimeout(300);
+            // ====================================================
+            // 2. FIND JOB START
+            // ====================================================
 
+            console.log("");
+            console.log("STEP 2: Finding Job Start...");
 
-        console.log(
-            "Job Start successfully changed to:",
-            await startTimeInput.inputValue()
-        );
-
-    }} else {{
-
-        console.log("");
-        console.log(
-            "STEP 4: No Job Start supplied. "
-            + "Leaving unchanged."
-        );
-    }}
-
-
-    // ========================================================
-    // VERIFY JOB START BEFORE DOING ANYTHING ELSE
-    // ========================================================
-
-    console.log("");
-    console.log(
-        "VERIFYING JOB START BEFORE OTHER FIELDS..."
-    );
-
-
-    const verifiedStart =
-        await startTimeInput.inputValue();
-
-
-    console.log(
-        "Verified Job Start:",
-        verifiedStart
-    );
-
-
-    // ========================================================
-    // JOB END LOCATOR
-    // ========================================================
-
-    const endTimeInput = page.locator(
-        'input[name="actioncompletiondate_time"]'
-    );
-
-
-    await endTimeInput.waitFor({{
-        state: "visible",
-        timeout: 10000
-    }});
-
-
-    // ========================================================
-    // WORKLOG TEXT
-    // ========================================================
-
-    console.log("");
-    console.log("STEP 5: Entering Worklog...");
-
-    const editor = page.locator(
-        '[contenteditable="true"]'
-    ).first();
-
-
-    await editor.waitFor({{
-        state: "visible",
-        timeout: 10000
-    }});
-
-
-    await editor.fill(
-        {worklog_text!r}
-    );
-
-
-    await page.waitForTimeout(300);
-
-
-    console.log(
-        "Worklog entered."
-    );
-
-
-    // ========================================================
-    // STATUS
-    // ========================================================
-
-    console.log("");
-    console.log(
-        "STEP 6: Setting Status:",
-        {status!r}
-    );
-
-
-    const statusCombobox = page.getByRole(
-        "combobox",
-        {{
-            name: "Status *"
-        }}
-    );
-
-
-    await statusCombobox.click();
-
-    await page.waitForTimeout(500);
-
-
-    // Use the actual React Select option rather than
-    // getByText(), because getByText() can match both
-    // the selected value and the dropdown option.
-
-    const statusOption = page.locator(
-        ".Select__option",
-        {{
-            hasText: {status!r}
-        }}
-    ).last();
-
-
-    await statusOption.waitFor({{
-        state: "visible",
-        timeout: 10000
-    }});
-
-
-    await statusOption.click();
-
-    await page.waitForTimeout(500);
-
-
-    console.log(
-        "Status selected."
-    );
-
-
-    // ========================================================
-    // JOB END
-    // ========================================================
-
-    if ({end_time!r}) {{
-
-        console.log("");
-        console.log("STEP 7: Setting Job End...");
-
-        console.log(
-            "Requested Job End:",
-            {end_time!r}
-        );
-
-
-        await endTimeInput.click();
-
-        await endTimeInput.fill(
-            {end_time!r}
-        );
-
-
-        const endAfterFill =
-            await endTimeInput.inputValue();
-
-
-        console.log(
-            "Job End after fill:",
-            endAfterFill
-        );
-
-
-        if (endAfterFill !== {end_time!r}) {{
-
-            throw new Error(
-                "Job End did not accept requested value. "
-                + "Expected: "
-                + {end_time!r}
-                + " Actual: "
-                + endAfterFill
+            const startTimeInput = page.locator(
+                'input[name="actionarrivaldate_time"]'
             );
+
+            const startCount =
+                await startTimeInput.count();
+
+            console.log(
+                "Job Start matching elements:",
+                startCount
+            );
+
+            if (startCount !== 1) {{
+                throw new Error(
+                    "Expected exactly one Job Start input, found "
+                    + startCount
+                );
+            }}
+
+            await startTimeInput.waitFor({{
+                state: "visible",
+                timeout: 10000
+            }});
+
+            console.log(
+                "Job Start found."
+            );
+
+            console.log(
+                "Job Start current value:",
+                await startTimeInput.inputValue()
+            );
+
+
+            // ====================================================
+            // 3. CLICK JOB START
+            // ====================================================
+
+            console.log("");
+            console.log("STEP 3: Clicking Job Start...");
+
+            await startTimeInput.click();
+
+            await page.waitForTimeout(150);
+
+
+            const focusedAfterClick =
+                await startTimeInput.evaluate(
+                    el => document.activeElement === el
+                );
+
+            console.log(
+                "Job Start focused after click:",
+                focusedAfterClick
+            );
+
+            if (!focusedAfterClick) {{
+                throw new Error(
+                    "Job Start was located and clicked, "
+                    + "but it did not receive focus."
+                );
+            }}
+
+
+            // ====================================================
+            // 4. FILL JOB START
+            // ====================================================
+
+            if ({start_time!r}) {{
+
+                console.log("");
+                console.log("STEP 4: Filling Job Start...");
+
+                console.log(
+                    "Requested Job Start:",
+                    {start_time!r}
+                );
+
+                await startTimeInput.fill(
+                    {start_time!r}
+                );
+
+                await page.waitForTimeout(150);
+
+
+                const startAfterFill =
+                    await startTimeInput.inputValue();
+
+                console.log(
+                    "Job Start after fill:",
+                    startAfterFill
+                );
+
+
+                if (
+                    startAfterFill !== {start_time!r}
+                ) {{
+
+                    throw new Error(
+                        "Job Start did not contain the "
+                        + "requested value after fill. "
+                        + "Expected: "
+                        + {start_time!r}
+                        + " Actual: "
+                        + startAfterFill
+                    );
+                }}
+
+            }} else {{
+
+                console.log(
+                    "No Job Start supplied; "
+                    + "leaving existing value unchanged."
+                );
+
+            }}
+
+
+            // ====================================================
+            // JOB END LOCATOR
+            // ====================================================
+
+            console.log("");
+            console.log(
+                "Finding Job End..."
+            );
+
+            const endTimeInput = page.locator(
+                'input[name="actioncompletiondate_time"]'
+            );
+
+            await endTimeInput.waitFor({{
+                state: "visible",
+                timeout: 10000
+            }});
+
+
+            // ====================================================
+            // WORKLOG TEXT
+            // ====================================================
+
+            console.log("");
+            console.log(
+                "Entering worklog text..."
+            );
+
+            const editor = page.locator(
+                '[contenteditable="true"]'
+            ).first();
+
+            await editor.waitFor({{
+                state: "visible",
+                timeout: 10000
+            }});
+
+            await editor.fill(
+                {worklog_text!r}
+            );
+
+            await page.waitForTimeout(300);
+
+
+            // ====================================================
+            // STATUS
+            // ====================================================
+
+            console.log("");
+            console.log(
+                "Setting status: {status}"
+            );
+
+            const statusCombobox = page.getByRole(
+                "combobox",
+                {{
+                    name: "Status *"
+                }}
+            );
+
+            await statusCombobox.waitFor({{
+                state: "visible",
+                timeout: 10000
+            }});
+
+            await statusCombobox.click();
+
+            await page.waitForTimeout(500);
+
+
+            const statusOption = page.locator(
+                ".Select__option",
+                {{
+                    hasText: {status!r}
+                }}
+            ).last();
+
+
+            await statusOption.waitFor({{
+                state: "visible",
+                timeout: 10000
+            }});
+
+            await statusOption.click();
+
+            await page.waitForTimeout(500);
+
+
+            // ====================================================
+            // JOB END
+            // ====================================================
+
+            if ({end_time!r}) {{
+
+                console.log("");
+                console.log("Setting Job End...");
+
+                console.log(
+                    "Requested Job End:",
+                    {end_time!r}
+                );
+
+                await endTimeInput.click();
+
+                await endTimeInput.fill(
+                    {end_time!r}
+                );
+
+                await page.waitForTimeout(150);
+
+
+                const endAfterFill =
+                    await endTimeInput.inputValue();
+
+                console.log(
+                    "Job End after fill:",
+                    endAfterFill
+                );
+
+
+                if (
+                    endAfterFill !== {end_time!r}
+                ) {{
+
+                    throw new Error(
+                        "Job End did not contain the "
+                        + "requested value after fill. "
+                        + "Expected: "
+                        + {end_time!r}
+                        + " Actual: "
+                        + endAfterFill
+                    );
+                }}
+
+            }} else {{
+
+                console.log(
+                    "No Job End supplied; "
+                    + "leaving existing value unchanged."
+                );
+
+            }}
+
+
+            // ====================================================
+            // VERIFY BOTH TIMES
+            // ====================================================
+
+            console.log("");
+            console.log("========================================");
+            console.log("TIME VERIFICATION");
+            console.log("========================================");
+
+            const verifiedStart =
+                await startTimeInput.inputValue();
+
+            const verifiedEnd =
+                await endTimeInput.inputValue();
+
+            console.log(
+                "Job Start:",
+                verifiedStart
+            );
+
+            console.log(
+                "Job End:",
+                verifiedEnd
+            );
+
+
+            if (
+                {start_time!r}
+                && verifiedStart !== {start_time!r}
+            ) {{
+
+                throw new Error(
+                    "FINAL Job Start verification failed."
+                );
+            }}
+
+            if (
+                {end_time!r}
+                && verifiedEnd !== {end_time!r}
+            ) {{
+
+                throw new Error(
+                    "FINAL Job End verification failed."
+                );
+            }}
+
+
+            // ====================================================
+            // CHARGE TYPE
+            // ====================================================
+
+            console.log("");
+            console.log(
+                "Setting charge type: {charge_type}"
+            );
+
+            const chargeCombobox = page.getByRole(
+                "combobox",
+                {{
+                    name: "Charge Type *"
+                }}
+            );
+
+            await chargeCombobox.waitFor({{
+                state: "visible",
+                timeout: 10000
+            }});
+
+            await chargeCombobox.click();
+
+            await page.waitForTimeout(500);
+
+
+            const chargeOption = page.locator(
+                ".Select__option",
+                {{
+                    hasText: {charge_type!r}
+                }}
+            ).last();
+
+
+            await chargeOption.waitFor({{
+                state: "visible",
+                timeout: 10000
+            }});
+
+            await chargeOption.click();
+
+            await page.waitForTimeout(500);
+
+
+            // ====================================================
+            // FINAL CHECK BEFORE SAVE
+            // ====================================================
+
+            console.log("");
+            console.log("========================================");
+            console.log("FINAL VALUES BEFORE SAVE");
+            console.log("========================================");
+
+            const finalStart =
+                await startTimeInput.inputValue();
+
+            const finalEnd =
+                await endTimeInput.inputValue();
+
+            console.log(
+                "Job Start:",
+                finalStart
+            );
+
+            console.log(
+                "Job End:",
+                finalEnd
+            );
+
+
+            if (
+                {start_time!r}
+                && finalStart !== {start_time!r}
+            ) {{
+
+                throw new Error(
+                    "Job Start changed unexpectedly before save."
+                    + " Expected "
+                    + {start_time!r}
+                    + " but found "
+                    + finalStart
+                );
+            }}
+
+            if (
+                {end_time!r}
+                && finalEnd !== {end_time!r}
+            ) {{
+
+                throw new Error(
+                    "Job End changed unexpectedly before save."
+                    + " Expected "
+                    + {end_time!r}
+                    + " but found "
+                    + finalEnd
+                );
+            }}
+
+
+            // ====================================================
+            // SAVE
+            // ====================================================
+
+            console.log("");
+            console.log(
+                "Saving worklog..."
+            );
+
+            const saveButton = page.getByRole(
+                "button",
+                {{
+                    name: "Save",
+                    exact: true
+                }}
+            );
+
+            await saveButton.waitFor({{
+                state: "visible",
+                timeout: 10000
+            }});
+
+            await saveButton.click();
+
+            await page.waitForTimeout(2000);
+
+
+            console.log("");
+            console.log("========================================");
+            console.log("WORKLOG SAVED");
+            console.log("========================================");
+
+            console.log(
+                "URL:",
+                page.url()
+            );
+
+
+            return {{
+                finalStart,
+                finalEnd,
+                urlAfterSave: page.url()
+            }};
         }}
-
-
-        await endTimeInput.press(
-            "Tab"
-        );
-
-        await page.waitForTimeout(300);
-
-    }} else {{
-
-        console.log(
-            "No Job End supplied. Leaving unchanged."
-        );
-    }}
-
-
-    // ========================================================
-    // CHARGE TYPE
-    // ========================================================
-
-    console.log("");
-    console.log(
-        "STEP 8: Setting Charge Type:",
-        {charge_type!r}
-    );
-
-
-    const chargeCombobox = page.getByRole(
-        "combobox",
-        {{
-            name: "Charge Type *"
-        }}
-    );
-
-
-    await chargeCombobox.click();
-
-    await page.waitForTimeout(500);
-
-
-    const chargeOption = page.locator(
-        ".Select__option",
-        {{
-            hasText: {charge_type!r}
-        }}
-    ).last();
-
-
-    await chargeOption.waitFor({{
-        state: "visible",
-        timeout: 10000
-    }});
-
-
-    await chargeOption.click();
-
-    await page.waitForTimeout(500);
-
-
-    console.log(
-        "Charge Type selected."
-    );
-
-
-    // ========================================================
-    // FINAL VERIFICATION
-    // ========================================================
-
-    console.log("");
-    console.log("========================================");
-    console.log("FINAL VALUES BEFORE SAVE");
-    console.log("========================================");
-
-
-    const finalStart =
-        await startTimeInput.inputValue();
-
-    const finalEnd =
-        await endTimeInput.inputValue();
-
-
-    console.log(
-        "Job Start:",
-        finalStart
-    );
-
-    console.log(
-        "Job End:",
-        finalEnd
-    );
-
-
-    // If a Start was requested, make absolutely sure
-    // it survived all the other field interactions.
-
-    if (
-        {start_time!r}
-        && finalStart !== {start_time!r}
-    ) {{
-
-        throw new Error(
-            "Job Start changed unexpectedly before save. "
-            + "Expected: "
-            + {start_time!r}
-            + " Actual: "
-            + finalStart
-        );
-    }}
-
-
-    if (
-        {end_time!r}
-        && finalEnd !== {end_time!r}
-    ) {{
-
-        throw new Error(
-            "Job End changed unexpectedly before save. "
-            + "Expected: "
-            + {end_time!r}
-            + " Actual: "
-            + finalEnd
-        );
-    }}
-
-
-    // ========================================================
-    // SAVE
-    // ========================================================
-
-    console.log("");
-    console.log("STEP 9: Saving Worklog...");
-
-
-    const saveButton = page.getByRole(
-        "button",
-        {{
-            name: "Save",
-            exact: true
-        }}
-    );
-
-
-    await saveButton.waitFor({{
-        state: "visible",
-        timeout: 10000
-    }});
-
-
-    await saveButton.click();
-
-
-    await page.waitForTimeout(2000);
-
-
-    console.log("");
-    console.log("========================================");
-    console.log("WORKLOG SAVED");
-    console.log("========================================");
-
-
-    console.log(
-        "URL:",
-        page.url()
-    );
-
-
-    return {{
-        start: finalStart,
-        end: finalEnd,
-        urlAfterSave: page.url()
-    }};
-}}
-"""
+        """
+    )
 
 
     temp_path = None
@@ -1078,9 +1048,8 @@ async page => {{
             temp_path = temp_file.name
 
 
-        print()
         print(
-            "Running Halo automation..."
+            "\nRunning Halo automation..."
         )
 
 
@@ -1115,9 +1084,8 @@ async page => {{
 
 def take_snapshot():
 
-    print()
     print(
-        "Taking final snapshot..."
+        "\nTaking final snapshot..."
     )
 
     run_cli(
@@ -1144,18 +1112,17 @@ def main():
     try:
 
         # ====================================================
-        # ATTACH TO EXISTING EDGE
+        # ATTACH
         # ====================================================
 
         attach()
 
 
         # ====================================================
-        # TICKET SELECTION
+        # SELECT TICKET
         # ====================================================
 
         ticket = ""
-
 
         choice = input(
             "\n[1] Enter Ticket ID manually\n"
@@ -1169,12 +1136,10 @@ def main():
 
             tickets = scrape_ticket_options()
 
-
             if tickets:
 
-                print()
                 print(
-                    f"Found {len(tickets)} "
+                    f"\nFound {len(tickets)} "
                     "tickets on the current page:"
                 )
 
@@ -1219,7 +1184,6 @@ def main():
                     ticket = tickets[
                         int(sel) - 1
                     ]["id"]
-
 
                     print(
                         f"Selected Ticket ID: {ticket}"
@@ -1270,7 +1234,6 @@ def main():
 
         worklog_text = ""
 
-
         while not worklog_text:
 
             worklog_text = input(
@@ -1295,11 +1258,9 @@ def main():
             "On Hold"
         ]
 
-
         default_status = (
             "Completed (On Hold)"
         )
-
 
         status = default_status
 
@@ -1314,9 +1275,8 @@ def main():
 
             if status_input == "?":
 
-                print()
                 print(
-                    "Available Statuses:"
+                    "\nAvailable Statuses:"
                 )
 
                 print(
@@ -1378,19 +1338,49 @@ def main():
 
 
         # ====================================================
-        # START / END TIMES
+        # TIMES
         # ====================================================
 
-        start_time = input(
-            "Start time "
-            "[Leave unchanged, e.g. 09:00]: "
-        ).strip()
+        while True:
+
+            try:
+
+                start_time = normalize_time(
+                    input(
+                        "Start time "
+                        "[Leave unchanged, e.g. 09:00]: "
+                    ),
+                    "Start time"
+                )
+
+                break
+
+            except ValueError as exc:
+
+                print(
+                    f"Error: {exc}"
+                )
 
 
-        end_time = input(
-            "End time "
-            "[Leave unchanged, e.g. 10:00]: "
-        ).strip()
+        while True:
+
+            try:
+
+                end_time = normalize_time(
+                    input(
+                        "End time "
+                        "[Leave unchanged, e.g. 10:00]: "
+                    ),
+                    "End time"
+                )
+
+                break
+
+            except ValueError as exc:
+
+                print(
+                    f"Error: {exc}"
+                )
 
 
         # ====================================================
@@ -1404,11 +1394,7 @@ def main():
             "Internal Work"
         ]
 
-
-        default_charge = (
-            "Internal Work"
-        )
-
+        default_charge = "Internal Work"
 
         charge_type = default_charge
 
@@ -1423,9 +1409,8 @@ def main():
 
             if charge_input == "?":
 
-                print()
                 print(
-                    "Available Charge Types:"
+                    "\nAvailable Charge Types:"
                 )
 
                 print(
@@ -1519,11 +1504,9 @@ def main():
         print(
             "================================"
         )
-
         print(
             "Worklog automation completed."
         )
-
         print(
             "================================"
         )
@@ -1548,4 +1531,5 @@ def main():
 # ============================================================
 
 if __name__ == "__main__":
+
     main()
