@@ -16,13 +16,12 @@ async page => {
 
     await page.waitForTimeout(500);
 
-    await page.getByRole(
-        "option",
-        {
-            name: "Completed (On Hold)",
-            exact: true
-        }
-    ).click();
+    const statusOption = page.locator(
+        '.Select__option',
+        { hasText: "Completed (On Hold)" }
+    ).last();
+
+    await statusOption.click();
 
     await page.waitForTimeout(1000);
 
