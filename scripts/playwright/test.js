@@ -3,13 +3,19 @@ async page => {
         'input[name="actionarrivaldate_time"]'
     );
 
-    console.log("START BEFORE:", await start.inputValue());
+    const before = await start.inputValue();
 
     await start.fill("08:00");
 
-    console.log("START IMMEDIATELY:", await start.inputValue());
+    const immediately = await start.inputValue();
 
     await page.waitForTimeout(1500);
 
-    console.log("START AFTER 1.5 SEC:", await start.inputValue());
+    const after = await start.inputValue();
+
+    return {
+        before,
+        immediately,
+        after
+    };
 }
