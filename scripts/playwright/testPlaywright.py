@@ -9,8 +9,19 @@ import subprocess
 import tempfile
 import time
 
+
 BASE_URL = "https://support.eiresystems.com/ticket"
-ASSIGNED_TICKETS_URL = "https://support.eiresystems.com/tickets?area=1&mainview=team&viewid=2&selid=75&sellevel=2&selparentid=engineers%20tky"
+
+ASSIGNED_TICKETS_URL = (
+    "https://support.eiresystems.com/tickets"
+    "?area=1"
+    "&mainview=team"
+    "&viewid=2"
+    "&selid=75"
+    "&sellevel=2"
+    "&selparentid=engineers%20tky"
+)
+
 SESSION = "halo"
 
 
@@ -18,15 +29,20 @@ def find_playwright_cli():
     """
     Find playwright-cli without hard-coding the Windows username.
     """
+
     cli = shutil.which("playwright-cli")
+
     if cli:
         return cli
 
     cli = shutil.which("playwright-cli.cmd")
+
     if cli:
         return cli
 
-    raise FileNotFoundError("playwright-cli was not found in PATH.")
+    raise FileNotFoundError(
+        "playwright-cli was not found in PATH."
+    )
 
 
 CLI = find_playwright_cli()
@@ -36,18 +52,27 @@ def run_cli(*args, check=True):
     """
     Run playwright-cli safely across platforms.
     """
+
     if platform.system() == "Windows":
+
         quoted_args = []
 
         for arg in args:
+
             s = str(arg)
 
-            if not (s.startswith('"') and s.endswith('"')):
+            if not (
+                s.startswith('"')
+                and s.endswith('"')
+            ):
                 s = f'"{s}"'
 
             quoted_args.append(s)
 
-        cmd_str = f'"{CLI}" "--s={SESSION}" ' + " ".join(quoted_args)
+        cmd_str = (
+            f'"{CLI}" "--s={SESSION}" '
+            + " ".join(quoted_args)
+        )
 
         print()
         print("> " + cmd_str)
@@ -63,6 +88,7 @@ def run_cli(*args, check=True):
         )
 
     else:
+
         command = [
             CLI,
             f"--s={SESSION}",
@@ -85,9 +111,13 @@ def run_cli(*args, check=True):
     if result.stdout:
         print(result.stdout)
 
-    if check and result.returncode != 0:
+    if (
+        check
+        and result.returncode != 0
+    ):
         raise RuntimeError(
-            f"Playwright CLI command failed with exit code {result.returncode}"
+            "Playwright CLI command failed "
+            f"with exit code {result.returncode}"
         )
 
     return result.stdout
@@ -95,9 +125,15 @@ def run_cli(*args, check=True):
 
 def remove_readonly(func, path, excinfo):
     """
-    Error handler for shutil.rmtree to clear read-only bits and retry on Windows.
+    Error handler for shutil.rmtree to clear read-only bits
+    and retry on Windows.
     """
-    os.chmod(path, stat.S_IWRITE)
+
+    os.chmod(
+        path,
+        stat.S_IWRITE
+    )
+
     func(path)
 
 
@@ -105,15 +141,23 @@ def cleanup_local_artifacts():
     """
     Remove local Playwright folders.
     """
+
     folders_to_remove = [
         ".playwright",
         ".playwright-cli"
     ]
 
     for folder in folders_to_remove:
-        if os.path.exists(folder) and os.path.isdir(folder):
+
+        if (
+            os.path.exists(folder)
+            and os.path.isdir(folder)
+        ):
+
             for attempt in range(3):
+
                 try:
+
                     shutil.rmtree(
                         folder,
                         onerror=remove_readonly
@@ -126,16 +170,22 @@ def cleanup_local_artifacts():
                     break
 
                 except Exception as e:
+
                     if attempt == 2:
+
                         print(
                             f"Note: Could not fully remove "
                             f"folder {folder}: {e}"
                         )
+
                     else:
+
                         time.sleep(0.5)
 
 
-atexit.register(cleanup_local_artifacts)
+atexit.register(
+    cleanup_local_artifacts
+)
 
 
 def attach():
@@ -143,7 +193,10 @@ def attach():
     Attach the CLI session to Microsoft Edge and open
     the Assigned Tickets view.
     """
-    print("\nAttaching to Microsoft Edge...")
+
+    print(
+        "\nAttaching to Microsoft Edge..."
+    )
 
     run_cli(
         "attach",
@@ -153,7 +206,9 @@ def attach():
 
     time.sleep(1)
 
-    print("\nOpening Assigned Tickets view...")
+    print(
+        "\nOpening Assigned Tickets view..."
+    )
 
     run_cli(
         "goto",
@@ -168,6 +223,7 @@ def goto_ticket(ticket):
     """
     Navigate directly to the requested Halo ticket.
     """
+
     url = (
         f"{BASE_URL}"
         f"?id={ticket}"
@@ -188,8 +244,10 @@ def goto_ticket(ticket):
 
 def parse_snapshot_tickets(snapshot_output):
     """
-    Parse playwright-cli snapshot output into ticket dictionaries.
+    Parse the playwright-cli snapshot output into
+    structured ticket dictionaries.
     """
+
     tickets = []
 
     lines = snapshot_output.splitlines()
@@ -199,9 +257,13 @@ def parse_snapshot_tickets(snapshot_output):
 
     for line in lines:
 
-        if '"Bulk select"' in line or '[cursor=pointer]' in line:
+        if (
+            '"Bulk select"' in line
+            or '[cursor=pointer]' in line
+        ):
 
             if current_block:
+
                 parsed = _parse_single_block(
                     current_block
                 )
@@ -210,12 +272,15 @@ def parse_snapshot_tickets(snapshot_output):
                     tickets.append(parsed)
 
             current_block = [line]
+
             in_ticket_block = True
 
         elif in_ticket_block:
+
             current_block.append(line)
 
     if current_block:
+
         parsed = _parse_single_block(
             current_block
         )
@@ -251,27 +316,39 @@ def _parse_single_block(block_lines):
         )
 
         if match_quote:
+
             clean_lines.append(
                 match_quote.group(1)
             )
 
         elif match_text:
+
             clean_lines.append(
                 match_text.group(1).strip()
             )
 
         else:
+
             parts = line.split(
                 ':',
                 1
             )
 
-            if len(parts) > 1 and '"' not in parts[1]:
+            if (
+                len(parts) > 1
+                and '"' not in parts[1]
+            ):
 
                 val = parts[1].strip()
 
-                if val and not val.startswith('['):
-                    clean_lines.append(val)
+                if (
+                    val
+                    and not val.startswith('[')
+                ):
+
+                    clean_lines.append(
+                        val
+                    )
 
     for i, l in enumerate(clean_lines):
 
@@ -279,9 +356,14 @@ def _parse_single_block(block_lines):
             r'^00\d{5}$',
             l
         ):
+
             ticket_id = l
 
-        elif '/' in l and 'EIRE' in l:
+        elif (
+            '/' in l
+            and 'EIRE' in l
+        ):
+
             company = l
 
         elif l in [
@@ -291,16 +373,21 @@ def _parse_single_block(block_lines):
             "New",
             "Closed"
         ]:
+
             status = l
 
         elif re.match(
             r'^\d{1,2}/\d{1,2}/\d{4}\s+\d{2}:\d{2}$',
             l
         ):
+
             date_str = l
 
             if i > 0:
-                ticket_name = clean_lines[i - 1]
+
+                ticket_name = (
+                    clean_lines[i - 1]
+                )
 
         elif l in [
             "Service Request",
@@ -309,19 +396,24 @@ def _parse_single_block(block_lines):
             "Problem",
             "Change Request"
         ]:
+
             ticket_type = l
 
         elif re.match(
             r'^\d+:\d{2}$',
             l
         ):
+
             total_hours = l
 
     if ticket_id:
 
         return {
             "id": ticket_id,
-            "title": ticket_name or f"Ticket {ticket_id}",
+            "title": (
+                ticket_name
+                or f"Ticket {ticket_id}"
+            ),
             "company": company,
             "status": status,
             "date": date_str,
@@ -355,12 +447,25 @@ def run_halo_automation(
     end_time,
     charge_type
 ):
-    """
-    Run HaloPSA Worklog automation.
 
-    Job Start / Job End are located using their visible
-    field containers instead of guessing from the global
-    input order.
+    """
+    Run the HaloPSA Worklog automation.
+
+    IMPORTANT:
+
+    The Job Start / Job End fields are located based on
+    the structure shown in the Playwright snapshot:
+
+        Job Start
+            textbox = date
+            textbox = time
+
+        Job End
+            textbox = date
+            textbox = time
+
+    Therefore we do NOT search all inputs globally based
+    on their current values.
     """
 
     js_code = f"""
@@ -368,9 +473,18 @@ async page => {{
 
     console.log("Opening Worklog...");
 
-    await page.getByRole("button", {{
-        name: "Worklog"
-    }}).click();
+
+    // ---------------------------------------------------------
+    // OPEN WORKLOG
+    // ---------------------------------------------------------
+
+    await page.getByRole(
+        "button",
+        {{
+            name: "Worklog"
+        }}
+    ).click();
+
 
     await page.waitForTimeout(1500);
 
@@ -379,16 +493,21 @@ async page => {{
     // WORKLOG TEXT
     // ---------------------------------------------------------
 
-    console.log("Entering worklog...");
+    console.log(
+        "Entering worklog..."
+    );
+
 
     const editor = page.locator(
         '[contenteditable="true"]'
     ).first();
 
+
     await editor.waitFor({{
         state: "visible",
         timeout: 10000
     }});
+
 
     await editor.fill(
         {worklog_text!r}
@@ -403,20 +522,29 @@ async page => {{
         "Setting status: {status}"
     );
 
-    const statusCombobox = page.getByRole(
-        "combobox",
-        {{ name: "Status *" }}
-    );
+
+    const statusCombobox =
+        page.getByRole(
+            "combobox",
+            {{
+                name: "Status *"
+            }}
+        );
+
 
     await statusCombobox.click();
 
+
     await page.waitForTimeout(800);
+
 
     try {{
 
         await page.getByText(
             {status!r},
-            {{ exact: true }}
+            {{
+                exact: true
+            }}
         ).click();
 
     }} catch (e) {{
@@ -424,19 +552,28 @@ async page => {{
         await page.evaluate(
             targetText => {{
 
-                const items = Array.from(
-                    document.querySelectorAll(
-                        '.dropdown-item, [role="option"], li, div, .Select__option'
-                    )
-                );
+                const items =
+                    Array.from(
+                        document.querySelectorAll(
+                            '.dropdown-item, [role="option"], li, div, .Select__option'
+                        )
+                    );
 
-                const match = items.find(
-                    el =>
-                        el.textContent.trim() === targetText
-                );
+
+                const match =
+                    items.find(
+                        el =>
+                            el.offsetParent !== null
+                            &&
+                            el.textContent.trim()
+                                === targetText
+                    );
+
 
                 if (match) {{
+
                     match.click();
+
                 }}
 
             }},
@@ -446,54 +583,66 @@ async page => {{
 
 
     // ---------------------------------------------------------
-    // JOB START / END TIMES
+    // JOB START / END
     // ---------------------------------------------------------
 
     console.log("");
-    console.log("========================================");
-    console.log("JOB TIME UPDATE");
-    console.log("========================================");
-
     console.log(
-        "Requested Job Start:",
-        {start_time!r}
+        "========================================"
     );
-
     console.log(
-        "Requested Job End:",
-        {end_time!r}
+        "JOB START / END"
+    );
+    console.log(
+        "========================================"
     );
 
 
-    // ---------------------------------------------------------
-    // FIND THE FIELD CONTAINER
-    //
-    // Snapshot structure:
-    //
-    // generic
-    //   generic: Job Start
-    //   generic
-    //      textbox: Date
-    //   textbox: Time
-    //
-    // generic
-    //   generic: Job End
-    //   generic
-    //      textbox: Date
-    //   textbox: Time
-    // ---------------------------------------------------------
+    /*
+        IMPORTANT DOM STRUCTURE FROM SNAPSHOT:
 
-    async function getJobTimeInput(fieldName) {{
+        generic
+            generic: Job Start
+            generic
+                textbox: Date
+            textbox: 09:26
+
+        generic
+            generic: Job End
+            generic
+                textbox: Date
+            textbox: 09:01
+
+
+        The label and both inputs belong to the same
+        parent container.
+
+        We therefore locate the exact text "Job Start",
+        move to its parent, and then find the inputs
+        within that parent.
+    */
+
+
+    async function locateJobTimeInput(fieldName) {{
 
         console.log(
-            "Locating:",
+            "Locating",
             fieldName
         );
 
-        const label = page.getByText(
-            fieldName,
-            {{ exact: true }}
-        ).first();
+
+        // -----------------------------------------------------
+        // Find the exact visible field label.
+        // -----------------------------------------------------
+
+        const label =
+            page.getByText(
+                fieldName,
+                {{
+                    exact: true
+                }}
+            ).first();
+
 
         await label.waitFor({{
             state: "visible",
@@ -501,79 +650,166 @@ async page => {{
         }});
 
 
-        // The snapshot shows the label and its controls
-        // inside the same outer generic container.
-        //
-        // Start by going to the parent.
-        let container = label.locator("..");
-
-
-        // Find inputs/textboxes inside the parent.
-        let inputs = container.locator(
-            "input"
+        console.log(
+            fieldName,
+            "label found."
         );
 
-        let count = await inputs.count();
+
+        // -----------------------------------------------------
+        // The snapshot shows the label's parent contains
+        // both the date and time controls.
+        // -----------------------------------------------------
+
+        const container =
+            label.locator("..");
+
+
+        // -----------------------------------------------------
+        // Find INPUT elements directly under the container.
+        // -----------------------------------------------------
+
+        let inputs =
+            container.locator("input");
+
+
+        let inputCount =
+            await inputs.count();
+
 
         console.log(
             fieldName,
-            "inputs in immediate parent:",
-            count
+            "inputs in label parent:",
+            inputCount
         );
 
 
-        // If the immediate parent doesn't contain both
-        // controls, walk upward until we find them.
-        if (count < 2) {{
+        // -----------------------------------------------------
+        // If the inputs aren't direct descendants, walk
+        // upward until we find a container containing both.
+        // -----------------------------------------------------
 
-            for (let level = 0; level < 5; level++) {{
+        if (inputCount < 2) {{
 
-                container = container.locator("..");
+            console.log(
+                fieldName,
+                "walking upward to find input container..."
+            );
 
-                inputs = container.locator(
-                    "input"
-                );
 
-                count = await inputs.count();
+            let current =
+                container;
+
+
+            for (
+                let level = 1;
+                level <= 5;
+                level++
+            ) {{
+
+                current =
+                    current.locator("..");
+
+
+                const candidate =
+                    current.locator("input");
+
+
+                const candidateCount =
+                    await candidate.count();
+
 
                 console.log(
                     fieldName,
-                    "search level",
-                    level + 1,
-                    "inputs:",
-                    count
+                    "level",
+                    level,
+                    "input count:",
+                    candidateCount
                 );
 
-                if (count >= 2) {{
+
+                if (
+                    candidateCount >= 2
+                ) {{
+
+                    inputs =
+                        candidate;
+
+                    inputCount =
+                        candidateCount;
+
                     break;
                 }}
             }}
         }}
 
 
-        if (count < 2) {{
+        if (inputCount < 2) {{
 
             throw new Error(
                 fieldName +
-                ": Could not find date/time inputs. " +
-                "Found " +
-                count +
+                ": Could not locate the date/time inputs. " +
+                "Only found " +
+                inputCount +
                 " input(s)."
             );
         }}
 
 
-        // According to the snapshot:
+        // -----------------------------------------------------
+        // SHOW WHAT WE FOUND
+        // -----------------------------------------------------
+
+        for (
+            let i = 0;
+            i < inputCount;
+            i++
+        ) {{
+
+            try {{
+
+                console.log(
+                    fieldName,
+                    "input",
+                    i,
+                    "value:",
+                    await inputs
+                        .nth(i)
+                        .inputValue()
+                );
+
+            }} catch (e) {{
+
+                console.log(
+                    fieldName,
+                    "input",
+                    i,
+                    "could not read."
+                );
+            }}
+        }}
+
+
+        // -----------------------------------------------------
+        // Based on your snapshot:
         //
-        // nth(0) = date
-        // nth(1) = time
-        //
-        const timeInput = inputs.nth(1);
+        // input 0 = DATE
+        // input 1 = TIME
+        // -----------------------------------------------------
+
+        const timeInput =
+            inputs.nth(1);
 
 
         console.log(
             fieldName,
-            "current value:",
+            "TIME input located."
+        );
+
+
+        console.log(
+            fieldName,
+            "current time:",
             await timeInput.inputValue()
         );
 
@@ -598,22 +834,34 @@ async page => {{
         }}
 
 
-        const input = await getJobTimeInput(
-            fieldName
-        );
-
-
+        console.log("");
         console.log(
+            "Setting",
             fieldName,
-            "will be changed from",
-            await input.inputValue(),
             "to",
             requestedValue
         );
 
 
+        const timeInput =
+            await locateJobTimeInput(
+                fieldName
+            );
+
+
         // -----------------------------------------------------
-        // METHOD 1: Playwright fill()
+        // Click the actual time field.
+        // -----------------------------------------------------
+
+        await timeInput.click();
+
+
+        await page.waitForTimeout(200);
+
+
+        // -----------------------------------------------------
+        // METHOD 1:
+        // Normal Playwright fill
         // -----------------------------------------------------
 
         console.log(
@@ -621,55 +869,60 @@ async page => {{
             "Method 1: fill()"
         );
 
+
         try {{
 
-            await input.fill(
+            await timeInput.fill(
                 requestedValue
             );
-
-            await page.waitForTimeout(300);
 
         }} catch (e) {{
 
             console.log(
                 fieldName,
-                "fill() failed:",
+                "fill() threw an error:",
                 String(e)
             );
         }}
 
 
+        await page.waitForTimeout(500);
+
+
         let actualValue =
-            await input.inputValue();
+            await timeInput.inputValue();
 
 
         console.log(
             fieldName,
-            "after Method 1:",
+            "after fill():",
             actualValue
         );
 
 
-        if (actualValue === requestedValue) {{
+        if (
+            actualValue === requestedValue
+        ) {{
 
             console.log(
                 fieldName,
-                "SUCCESS with Method 1"
+                "SUCCESS using fill()."
             );
 
         }} else {{
 
             // -------------------------------------------------
-            // METHOD 2: Native HTML setter
+            // METHOD 2:
+            // Native HTML setter
             // -------------------------------------------------
 
             console.log(
                 fieldName,
-                "Method 2: native value setter"
+                "Method 2: native input setter"
             );
 
 
-            await input.evaluate(
+            await timeInput.evaluate(
                 (el, value) => {{
 
                     el.focus();
@@ -685,7 +938,8 @@ async page => {{
                     if (!setter) {{
 
                         throw new Error(
-                            "HTMLInputElement value setter not found."
+                            "Native input value setter "
+                            + "could not be found."
                         );
                     }}
 
@@ -700,7 +954,8 @@ async page => {{
                         new Event(
                             "input",
                             {{
-                                bubbles: true
+                                bubbles: true,
+                                composed: true
                             }}
                         )
                     );
@@ -710,7 +965,8 @@ async page => {{
                         new Event(
                             "change",
                             {{
-                                bubbles: true
+                                bubbles: true,
+                                composed: true
                             }}
                         )
                     );
@@ -727,46 +983,57 @@ async page => {{
 
 
             actualValue =
-                await input.inputValue();
+                await timeInput.inputValue();
 
 
             console.log(
                 fieldName,
-                "after Method 2:",
+                "after native setter:",
                 actualValue
             );
 
 
-            if (actualValue === requestedValue) {{
+            if (
+                actualValue === requestedValue
+            ) {{
 
                 console.log(
                     fieldName,
-                    "SUCCESS with Method 2"
+                    "SUCCESS using native setter."
                 );
 
             }} else {{
 
                 // ---------------------------------------------
-                // METHOD 3: Click + keyboard
+                // METHOD 3:
+                // Keyboard
                 // ---------------------------------------------
 
                 console.log(
                     fieldName,
-                    "Method 3: keyboard"
+                    "Method 3: keyboard input"
                 );
 
 
-                await input.click();
+                await timeInput.click();
 
-                await input.press(
+
+                await timeInput.press(
                     "Control+A"
                 );
 
-                await input.type(
+
+                await timeInput.press(
+                    "Backspace"
+                );
+
+
+                await timeInput.type(
                     requestedValue
                 );
 
-                await input.press(
+
+                await timeInput.press(
                     "Tab"
                 );
 
@@ -775,34 +1042,36 @@ async page => {{
 
 
                 actualValue =
-                    await input.inputValue();
+                    await timeInput.inputValue();
 
 
                 console.log(
                     fieldName,
-                    "after Method 3:",
+                    "after keyboard:",
                     actualValue
                 );
 
 
-                if (actualValue === requestedValue) {{
-
-                    console.log(
-                        fieldName,
-                        "SUCCESS with Method 3"
-                    );
-
-                }} else {{
+                if (
+                    actualValue !== requestedValue
+                ) {{
 
                     throw new Error(
                         fieldName +
-                        " could not be updated. " +
-                        "Expected: " +
+                        " could not be changed. " +
+                        "Expected '" +
                         requestedValue +
-                        " | Actual: " +
-                        actualValue
+                        "' but actual value is '" +
+                        actualValue +
+                        "'."
                     );
                 }}
+
+
+                console.log(
+                    fieldName,
+                    "SUCCESS using keyboard."
+                );
             }}
         }}
 
@@ -815,18 +1084,21 @@ async page => {{
 
 
         actualValue =
-            await input.inputValue();
+            await timeInput.inputValue();
 
 
-        if (actualValue !== requestedValue) {{
+        if (
+            actualValue !== requestedValue
+        ) {{
 
             throw new Error(
                 fieldName +
-                " verification failed. " +
-                "Expected: " +
+                " FINAL VERIFICATION FAILED. " +
+                "Expected '" +
                 requestedValue +
-                " | Actual: " +
-                actualValue
+                "' but got '" +
+                actualValue +
+                "'."
             );
         }}
 
@@ -864,7 +1136,7 @@ async page => {{
     );
 
     console.log(
-        "Job Start / End processing complete."
+        "JOB TIMES COMPLETE"
     );
 
     console.log(
@@ -895,11 +1167,14 @@ async page => {{
             const chargeTypeCombobox =
                 page.getByRole(
                     "combobox",
-                    {{ name: "Charge Type *" }}
+                    {{
+                        name: "Charge Type *"
+                    }}
                 );
 
 
             await chargeTypeCombobox.click();
+
 
             await page.waitForTimeout(800);
 
@@ -921,13 +1196,14 @@ async page => {{
 
 
                         for (
-                            const sel of selectors
+                            const selector
+                            of selectors
                         ) {{
 
                             const items =
                                 Array.from(
                                     document.querySelectorAll(
-                                        sel
+                                        selector
                                     )
                                 );
 
@@ -935,9 +1211,10 @@ async page => {{
                             const match =
                                 items.find(
                                     el =>
-                                        el.offsetParent !== null &&
-                                        el.textContent.trim() ===
-                                            targetText
+                                        el.offsetParent !== null
+                                        &&
+                                        el.textContent.trim()
+                                            === targetText
                                 );
 
 
@@ -969,7 +1246,7 @@ async page => {{
             console.log(
                 "Charge attempt " +
                 attempt +
-                " failed, retrying..."
+                " failed. Retrying..."
             );
         }}
 
@@ -986,9 +1263,11 @@ async page => {{
                 {charge_type!r}
             );
 
+
             await page.keyboard.press(
                 "Enter"
             );
+
 
             chargeSelected = true;
 
@@ -1026,21 +1305,21 @@ async page => {{
                 )
             ).find(
                 el =>
-                    el.value === "Save" ||
+                    el.value === "Save"
+                    ||
                     el.textContent.trim() === "Save"
             );
 
 
-        if (saveBtn) {{
-
-            saveBtn.click();
-
-        }} else {{
+        if (!saveBtn) {{
 
             throw new Error(
                 "Save button not found in DOM."
             );
         }}
+
+
+        saveBtn.click();
     }});
 
 
@@ -1053,9 +1332,12 @@ async page => {{
 }}
 """
 
+
     temp_path = None
 
+
     try:
+
         with tempfile.NamedTemporaryFile(
             mode="w",
             suffix=".js",
@@ -1070,27 +1352,33 @@ async page => {{
 
             temp_path = temp_file.name
 
+
         print(
             "\nRunning Halo automation..."
         )
 
+
         run_cli(
             "run-code",
-            f"--filename={temp_path}",
+            f"--filename={temp_path}"
         )
 
+
     finally:
+
         if (
             temp_path
             and os.path.exists(temp_path)
         ):
 
             try:
+
                 os.remove(
                     temp_path
                 )
 
             except OSError:
+
                 pass
 
 
@@ -1115,27 +1403,35 @@ def main():
         "=========================="
     )
 
+
     try:
+
         attach()
+
 
         ticket = ""
 
+
         choice = input(
             "\n[1] Enter Ticket ID manually\n"
-            "[2] Scrape Ticket IDs & metadata from current snapshot view\n"
+            "[2] Scrape Ticket IDs & metadata "
+            "from current snapshot view\n"
             "Select option [1/2]: "
         ).strip()
+
 
         if choice == "2":
 
             tickets = scrape_ticket_options()
 
+
             if tickets:
 
                 print(
                     f"\nFound {len(tickets)} "
-                    f"tickets on the current page:"
+                    "tickets on the current page:"
                 )
+
 
                 for idx, t in enumerate(
                     tickets,
@@ -1148,25 +1444,28 @@ def main():
                         else ""
                     )
 
+
                     type_info = (
                         f" ({t['type']})"
                         if t["type"]
                         else ""
                     )
 
+
                     print(
                         f"  [{idx}] "
                         f"{t['id']}"
                         f"{date_info}"
-                        f"{type_info}"
-                        f" - "
+                        f"{type_info} - "
                         f"{t['title']}"
                     )
+
 
                 sel = input(
                     "\nEnter selection number "
                     "or type a Ticket ID directly: "
                 ).strip()
+
 
                 if (
                     sel.isdigit()
@@ -1176,6 +1475,7 @@ def main():
                     ticket = tickets[
                         int(sel) - 1
                     ]["id"]
+
 
                     print(
                         f"Selected Ticket ID: {ticket}"
@@ -1192,6 +1492,7 @@ def main():
                     "parsed from this snapshot."
                 )
 
+
         while (
             not ticket
             or not ticket.isdigit()
@@ -1200,6 +1501,7 @@ def main():
             ticket = input(
                 "\nEnter Ticket Number: "
             ).strip()
+
 
             if (
                 not ticket
@@ -1213,7 +1515,9 @@ def main():
 
                 ticket = ""
 
+
         worklog_text = ""
+
 
         while not worklog_text:
 
@@ -1221,11 +1525,17 @@ def main():
                 "Worklog text (Required): "
             ).strip()
 
+
             if not worklog_text:
 
                 print(
                     "Worklog text cannot be empty."
                 )
+
+
+        # -----------------------------------------------------
+        # STATUS
+        # -----------------------------------------------------
 
         status_options = [
             "In Progress",
@@ -1233,11 +1543,14 @@ def main():
             "On Hold"
         ]
 
+
         default_status = (
             "Completed (On Hold)"
         )
 
+
         status = default_status
+
 
         while True:
 
@@ -1245,6 +1558,7 @@ def main():
                 f"Status [? for options] "
                 f"[{default_status}]: "
             ).strip()
+
 
             if status_input == "?":
 
@@ -1256,6 +1570,7 @@ def main():
                     "-" * 25
                 )
 
+
                 for idx, opt in enumerate(
                     status_options,
                     1
@@ -1265,13 +1580,16 @@ def main():
                         f"  [{idx}] {opt}"
                     )
 
+
                 print(
                     "-" * 25
                 )
 
+
                 sel = input(
                     "Select option number: "
                 ).strip()
+
 
                 if (
                     sel.isdigit()
@@ -1303,15 +1621,26 @@ def main():
 
                 break
 
+
+        # -----------------------------------------------------
+        # JOB TIMES
+        # -----------------------------------------------------
+
         start_time = input(
             "Start time "
             "[Leave unchanged, e.g. 09:00]: "
         ).strip()
 
+
         end_time = input(
             "End time "
             "[Leave unchanged, e.g. 10:00]: "
         ).strip()
+
+
+        # -----------------------------------------------------
+        # CHARGE TYPE
+        # -----------------------------------------------------
 
         charge_options = [
             "Project Work- Managed Services",
@@ -1320,9 +1649,14 @@ def main():
             "Internal Work"
         ]
 
-        default_charge = "Internal Work"
+
+        default_charge = (
+            "Internal Work"
+        )
+
 
         charge_type = default_charge
+
 
         while True:
 
@@ -1330,6 +1664,7 @@ def main():
                 f"Charge type [? for options] "
                 f"[{default_charge}]: "
             ).strip()
+
 
             if charge_input == "?":
 
@@ -1341,6 +1676,7 @@ def main():
                     "-" * 35
                 )
 
+
                 for idx, opt in enumerate(
                     charge_options,
                     1
@@ -1350,22 +1686,27 @@ def main():
                         f"  [{idx}] {opt}"
                     )
 
+
                 print(
                     "-" * 35
                 )
 
+
                 sel = input(
                     "Select option number: "
                 ).strip()
+
 
                 if (
                     sel.isdigit()
                     and 1 <= int(sel) <= len(charge_options)
                 ):
 
-                    charge_type = charge_options[
-                        int(sel) - 1
-                    ]
+                    charge_type = (
+                        charge_options[
+                            int(sel) - 1
+                        ]
+                    )
 
                     break
 
@@ -1388,9 +1729,15 @@ def main():
 
                 break
 
+
+        # -----------------------------------------------------
+        # RUN
+        # -----------------------------------------------------
+
         goto_ticket(
             ticket
         )
+
 
         run_halo_automation(
             worklog_text,
@@ -1400,7 +1747,9 @@ def main():
             charge_type
         )
 
+
         take_snapshot()
+
 
         print()
 
@@ -1415,6 +1764,7 @@ def main():
         print(
             "================================"
         )
+
 
     except Exception as exc:
 
