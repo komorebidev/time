@@ -1,0 +1,220 @@
+- generic [ref=e1]:
+  - main [ref=e2]:
+    - generic [ref=e4]:
+      - link [ref=e5] [cursor=pointer]:
+        - /url: "#maincontent"
+        - text: Skip to main content
+      - generic [ref=e6]:
+        - navigation [ref=e7]:
+          - generic [ref=e8]:
+            - generic [ref=e9]:
+              - button [ref=e11] [cursor=pointer]
+              - generic [ref=e12]:
+                - link [ref=e13] [cursor=pointer]:
+                  - /url: /
+                - generic [ref=e17]:
+                  - link [ref=e18] [cursor=pointer]:
+                    - /url: /tickets?showalltickettypes=1&mainview=all
+                    - text: Tickets
+                  - generic [ref=e19]: ">"
+                  - link [ref=e20] [cursor=pointer]:
+                    - /url: /ticket?id=0026229&showalltickettypes=1&newaction=44
+                    - text: "0026229"
+            - generic [ref=e21]:
+              - button [ref=e23] [cursor=pointer]:
+                - img [ref=e24]: 
+              - generic [ref=e26]:
+                - generic [ref=e27]: "77"
+                - button [ref=e28] [cursor=pointer]:
+                  - img [ref=e29]: 
+              - button [ref=e32] [cursor=pointer]
+              - button [ref=e36] [cursor=pointer]:
+                - img [ref=e37]: 
+              - button [ref=e40] [cursor=pointer]
+              - button [ref=e44] [cursor=pointer]:
+                - img [ref=e45]: 
+              - button [ref=e48] [cursor=pointer]:
+                - generic [ref=e49]: RS
+            - button [ref=e54] [cursor=pointer]:
+              - generic [ref=e55]: 
+              - text: New Ticket
+        - main [ref=e56]:
+          - generic [ref=e60]:
+            - generic [ref=e62]:
+              - generic [ref=e63]:
+                - button [ref=e64] [cursor=pointer]:
+                  - generic [ref=e65]: 
+                - button [ref=e66] [cursor=pointer]:
+                  - generic [ref=e67]: 
+                - listbox [ref=e68] [cursor=pointer]:                 
+              - generic [ref=e70]:
+                - button [ref=e71] [cursor=pointer]:
+                  - generic [ref=e72]: 
+                  - text: Worklog
+                - button [ref=e73] [cursor=pointer]:
+                  - generic [ref=e74]: 
+                  - text: Email User
+                - button [ref=e75] [cursor=pointer]:
+                  - generic [ref=e76]: 
+                  - text: Internal Note
+                - button [ref=e77] [cursor=pointer]:
+                  - generic [ref=e78]: 
+                  - text: Make Appointment
+                - listbox [ref=e79] [cursor=pointer]:    
+            - generic [ref=e86]:
+              - tablist [ref=e87]:
+                - tab [selected] [ref=e88] [cursor=pointer]: Progress
+                - tab [ref=e89] [cursor=pointer]: Details
+              - tabpanel [ref=e90]:
+                - generic [ref=e93]:
+                  - generic [ref=e94]:
+                    - generic [ref=e96]:
+                      - listbox [ref=e97] [cursor=pointer]:
+                        - button [ref=e98]:
+                          - img [ref=e99]: 
+                        - text:      
+                      - button [ref=e101] [cursor=pointer]:
+                        - img [ref=e102]: 
+                      - button [ref=e104] [cursor=pointer]:
+                        - img [ref=e105]: 
+                    - generic [ref=e111]:
+                      - heading [level=1] [ref=e115]: "[ID:0026229]"
+                      - generic [ref=e117]:
+                        - generic [ref=e118] [cursor=pointer]: September 2026
+                        - generic [ref=e128]:
+                          - generic [ref=e130]:
+                            - generic [ref=e131]: "1"
+                            - generic [ref=e132]: Service Desk
+                          - generic [ref=e135]:
+                            - generic [ref=e136]: "2"
+                            - generic [ref=e137]: Resolved
+                  - generic [ref=e142]:
+                    - button [ref=e143] [cursor=pointer]:
+                      - img [ref=e144]: 
+                    - button [ref=e146] [cursor=pointer]
+                    - generic [ref=e147]:
+                      - generic [ref=e148] [cursor=pointer]: RS
+                      - generic:
+                        - generic: Raphael Solema
+                        - generic: Worklog
+                    - generic [ref=e153]:
+                      - generic [ref=e155]:
+                        - generic [ref=e159]:
+                          - generic [ref=e160]: "*"
+                          - application [ref=e161]:
+                            - generic [ref=e162]:
+                              - button [ref=e164] [cursor=pointer]:
+                                - generic [ref=e167]: Fullscreen
+                              - button [ref=e169] [cursor=pointer]:
+                                - generic [ref=e172]: Font Style Options
+                              - generic [ref=e173]:
+                                - button [ref=e174] [cursor=pointer]:
+                                  - generic [ref=e177]: Align
+                                - option [ref=e178] [cursor=pointer]:
+                                  - generic [ref=e181]: Align Left
+                                - option [ref=e182] [cursor=pointer]:
+                                  - generic [ref=e185]: Align Center
+                                - option [ref=e186] [cursor=pointer]:
+                                  - generic [ref=e189]: Align Right
+                                - option [ref=e190] [cursor=pointer]:
+                                  - generic [ref=e193]: Align Justify
+                                - generic [ref=e194]:
+                                  - button [ref=e195] [cursor=pointer]:
+                                    - generic [ref=e198]: Ordered List
+                                  - button [ref=e199] [cursor=pointer]
+                                  - option [ref=e200] [cursor=pointer]: Default
+                                  - option [ref=e201] [cursor=pointer]: Lower Alpha
+                                  - option [ref=e202] [cursor=pointer]: Lower Greek
+                                  - option [ref=e203] [cursor=pointer]: Lower Roman
+                                  - option [ref=e204] [cursor=pointer]: Upper Alpha
+                                  - option [ref=e205] [cursor=pointer]: Upper Roman
+                                - generic [ref=e206]:
+                                  - button [ref=e207] [cursor=pointer]:
+                                    - generic [ref=e210]: Unordered List
+                                  - button [ref=e211] [cursor=pointer]
+                                  - option [ref=e212] [cursor=pointer]: Default
+                                  - option [ref=e213] [cursor=pointer]: Circle
+                                  - option [ref=e214] [cursor=pointer]: Disc
+                                  - option [ref=e215] [cursor=pointer]: Square
+                                - button [ref=e216] [cursor=pointer]:
+                                  - generic [ref=e219]: Quote
+                                - option [ref=e220] [cursor=pointer]: IncreaseCtrl+'
+                                - option [ref=e221] [cursor=pointer]: DecreaseCtrl+Shift+'
+                              - generic [ref=e222]:
+                                - button [ref=e223] [cursor=pointer]:
+                                  - generic [ref=e226]: Insert Link
+                                - button [ref=e227] [cursor=pointer]:
+                                  - generic [ref=e230]: Insert Image
+                                - button [ref=e231] [cursor=pointer]:
+                                  - generic [ref=e234]: Insert Table
+                              - button [ref=e236] [cursor=pointer]:
+                                - generic [ref=e239]: Emoticons
+                              - generic [ref=e240]:
+                                - button [ref=e241] [cursor=pointer]:
+                                  - generic [ref=e244]: Insert Canned Text
+                                - option [ref=e245] [cursor=pointer]: Items shipped to user
+                                - option [ref=e246] [cursor=pointer]: Please Provide More Informantion
+                                - button [ref=e247] [cursor=pointer]:
+                                  - generic [ref=e250]: Create a Canned Text from Selection
+                              - generic [ref=e251]:
+                                - button [ref=e252] [cursor=pointer]:
+                                  - generic [ref=e255]: Insert Horizontal Line
+                                - button [ref=e256] [cursor=pointer]:
+                                  - generic [ref=e259]: Clear Formatting
+                              - button [ref=e261] [cursor=pointer]:
+                                - generic [ref=e264]: Code View
+                            - paragraph [ref=e268]: test
+                        - generic [ref=e272]:
+                          - generic [ref=e273]: Status *
+                          - generic [ref=e278]:
+                            - generic [ref=e279]: Completed (On Hold)
+                            - combobox [ref=e281]
+                        - generic [ref=e289]:
+                          - generic [ref=e290]: Job Start
+                          - generic [ref=e293]:
+                            - textbox [ref=e294]:
+                              - /placeholder: Date
+                              - text: 9/2/2026
+                            - paragraph [ref=e295]: Navigate forward to interact with the calendar and select a date. Press the question mark key to get the keyboard shortcuts for changing dates.
+                          - textbox [ref=e296]: 09:44
+                        - generic [ref=e299]:
+                          - generic [ref=e300]: Job End
+                          - generic [ref=e303]:
+                            - textbox [ref=e304]:
+                              - /placeholder: Date
+                              - text: 9/2/2026
+                            - paragraph [ref=e305]: Navigate forward to interact with the calendar and select a date. Press the question mark key to get the keyboard shortcuts for changing dates.
+                          - textbox [ref=e306]: 09:01
+                        - generic [ref=e309]:
+                          - generic [ref=e310]: Charge Type *
+                          - generic [ref=e315]:
+                            - generic [ref=e316]: Internal work
+                            - combobox [ref=e318]
+                      - generic [ref=e324]:
+                        - button [ref=e325] [cursor=pointer]: Save
+                        - button [ref=e326] [cursor=pointer]: Discard
+                  - generic [ref=e328]:
+                    - generic [ref=e329]:
+                      - generic [ref=e330] [cursor=pointer]: RS
+                      - generic [ref=e335] [cursor=pointer]:
+                        - generic [ref=e336]:
+                          - generic [ref=e337]: 9/1/2026 (09:00-10:00)
+                          - generic [ref=e338]: Raphael Solema (You)
+                        - generic [ref=e339]: Worklog
+                        - generic [ref=e341]: "Time Taken: 01:00 (Internal work)"
+                        - generic [ref=e342]: "Billed Hours: 01:00"
+                        - text:      
+                    - iframe [ref=e346]:
+                      - paragraph [ref=f1e4]: "Eire: Email catchup, internal communication, time recording, work logs"
+                  - generic [ref=e349]:
+                    - generic [ref=e350] [cursor=pointer]: RS
+                    - generic [ref=e355] [cursor=pointer]:
+                      - generic [ref=e356]:
+                        - generic [ref=e357]: 8/14/2026 10:35
+                        - generic [ref=e358]: Raphael Solema (You)
+                      - generic [ref=e359]: Opened
+                      - generic [ref=e360]: New
+                      - text:      
+  - generic [ref=e365]:
+    - generic [ref=e366]: Start date must be before the end date
+    - button [active] [ref=e368] [cursor=pointer]: Ok

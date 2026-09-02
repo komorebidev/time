@@ -139,7 +139,7 @@ def remove_readonly(func, path, excinfo):
 
 def cleanup_local_artifacts():
     """
-    Remove local Playwright folders.
+    Remove local .playwright or .playwright-cli folders.
     """
 
     folders_to_remove = [
@@ -244,7 +244,7 @@ def goto_ticket(ticket):
 
 def parse_snapshot_tickets(snapshot_output):
     """
-    Parse the playwright-cli snapshot output into
+    Parse the playwright-cli snapshot text output into
     structured ticket dictionaries.
     """
 
@@ -447,25 +447,21 @@ def run_halo_automation(
     end_time,
     charge_type
 ):
-
     """
     Run the HaloPSA Worklog automation.
 
-    IMPORTANT:
+    The Job Start and Job End fields use the actual HTML
+    name attributes discovered from the live Halo page:
 
-    The Job Start / Job End fields are located based on
-    the structure shown in the Playwright snapshot:
+        Job Start:
+            input[name="actionarrivaldate_time"]
 
-        Job Start
-            textbox = date
-            textbox = time
+        Job End:
+            input[name="actioncompletiondate_time"]
 
-        Job End
-            textbox = date
-            textbox = time
-
-    Therefore we do NOT search all inputs globally based
-    on their current values.
+    We deliberately do NOT use snapshot ref numbers,
+    global input indexes, or the generated IDs containing
+    "undefined".
     """
 
     js_code = f"""
@@ -583,7 +579,7 @@ async page => {{
 
 
     // ---------------------------------------------------------
-    // JOB START / END
+    // JOB START / END TIMES
     // ---------------------------------------------------------
 
     console.log("");
@@ -591,556 +587,209 @@ async page => {{
         "========================================"
     );
     console.log(
-        "JOB START / END"
+        "JOB START / END TIMES"
     );
     console.log(
         "========================================"
     );
 
 
-    /*
-        IMPORTANT DOM STRUCTURE FROM SNAPSHOT:
-
-        generic
-            generic: Job Start
-            generic
-                textbox: Date
-            textbox: 09:26
-
-        generic
-            generic: Job End
-            generic
-                textbox: Date
-            textbox: 09:01
+    // These are the actual HTML name attributes discovered
+    // from the live Halo page.
+    //
+    // Job Start:
+    // actionarrivaldate_time
+    //
+    // Job End:
+    // actioncompletiondate_time
 
 
-        The label and both inputs belong to the same
-        parent container.
-
-        We therefore locate the exact text "Job Start",
-        move to its parent, and then find the inputs
-        within that parent.
-    */
-
-
-    async function locateJobTimeInput(fieldName) {{
-
-        console.log(
-            "Locating",
-            fieldName
+    const startTimeInput =
+        page.locator(
+            'input[name="actionarrivaldate_time"]'
         );
 
 
-        // -----------------------------------------------------
-        // Find the exact visible field label.
-        // -----------------------------------------------------
-
-        const label =
-            page.getByText(
-                fieldName,
-                {{
-                    exact: true
-                }}
-            ).first();
-
-
-        await label.waitFor({{
-            state: "visible",
-            timeout: 10000
-        }});
-
-
-        console.log(
-            fieldName,
-            "label found."
+    const endTimeInput =
+        page.locator(
+            'input[name="actioncompletiondate_time"]'
         );
 
 
-        // -----------------------------------------------------
-        // The snapshot shows the label's parent contains
-        // both the date and time controls.
-        // -----------------------------------------------------
-
-        const container =
-            label.locator("..");
+    await startTimeInput.waitFor({{
+        state: "visible",
+        timeout: 10000
+    }});
 
 
-        // -----------------------------------------------------
-        // Find INPUT elements directly under the container.
-        // -----------------------------------------------------
-
-        let inputs =
-            container.locator("input");
+    await endTimeInput.waitFor({{
+        state: "visible",
+        timeout: 10000
+    }});
 
 
-        let inputCount =
-            await inputs.count();
+    console.log(
+        "Job Start current value:",
+        await startTimeInput.inputValue()
+    );
 
+
+    console.log(
+        "Job End current value:",
+        await endTimeInput.inputValue()
+    );
+
+
+    // ---------------------------------------------------------
+    // JOB START
+    // ---------------------------------------------------------
+
+    if ({start_time!r}) {{
 
         console.log(
-            fieldName,
-            "inputs in label parent:",
-            inputCount
+            "Setting Job Start to:",
+            {start_time!r}
         );
 
 
-        // -----------------------------------------------------
-        // If the inputs aren't direct descendants, walk
-        // upward until we find a container containing both.
-        // -----------------------------------------------------
-
-        if (inputCount < 2) {{
-
-            console.log(
-                fieldName,
-                "walking upward to find input container..."
-            );
+        await startTimeInput.click();
 
 
-            let current =
-                container;
-
-
-            for (
-                let level = 1;
-                level <= 5;
-                level++
-            ) {{
-
-                current =
-                    current.locator("..");
-
-
-                const candidate =
-                    current.locator("input");
-
-
-                const candidateCount =
-                    await candidate.count();
-
-
-                console.log(
-                    fieldName,
-                    "level",
-                    level,
-                    "input count:",
-                    candidateCount
-                );
-
-
-                if (
-                    candidateCount >= 2
-                ) {{
-
-                    inputs =
-                        candidate;
-
-                    inputCount =
-                        candidateCount;
-
-                    break;
-                }}
-            }}
-        }}
-
-
-        if (inputCount < 2) {{
-
-            throw new Error(
-                fieldName +
-                ": Could not locate the date/time inputs. " +
-                "Only found " +
-                inputCount +
-                " input(s)."
-            );
-        }}
-
-
-        // -----------------------------------------------------
-        // SHOW WHAT WE FOUND
-        // -----------------------------------------------------
-
-        for (
-            let i = 0;
-            i < inputCount;
-            i++
-        ) {{
-
-            try {{
-
-                console.log(
-                    fieldName,
-                    "input",
-                    i,
-                    "value:",
-                    await inputs
-                        .nth(i)
-                        .inputValue()
-                );
-
-            }} catch (e) {{
-
-                console.log(
-                    fieldName,
-                    "input",
-                    i,
-                    "could not read."
-                );
-            }}
-        }}
-
-
-        // -----------------------------------------------------
-        // Based on your snapshot:
-        //
-        // input 0 = DATE
-        // input 1 = TIME
-        // -----------------------------------------------------
-
-        const timeInput =
-            inputs.nth(1);
-
-
-        console.log(
-            fieldName,
-            "TIME input located."
+        await startTimeInput.fill(
+            {start_time!r}
         );
 
 
-        console.log(
-            fieldName,
-            "current time:",
-            await timeInput.inputValue()
+        // Blur the field so Halo receives the change.
+        await startTimeInput.press(
+            "Tab"
         );
 
 
-        return timeInput;
-    }}
+        await page.waitForTimeout(750);
 
 
-    async function setJobTime(
-        fieldName,
-        requestedValue
-    ) {{
-
-        if (!requestedValue) {{
-
-            console.log(
-                fieldName,
-                "left unchanged."
-            );
-
-            return;
-        }}
-
-
-        console.log("");
-        console.log(
-            "Setting",
-            fieldName,
-            "to",
-            requestedValue
-        );
-
-
-        const timeInput =
-            await locateJobTimeInput(
-                fieldName
-            );
-
-
-        // -----------------------------------------------------
-        // Click the actual time field.
-        // -----------------------------------------------------
-
-        await timeInput.click();
-
-
-        await page.waitForTimeout(200);
-
-
-        // -----------------------------------------------------
-        // METHOD 1:
-        // Normal Playwright fill
-        // -----------------------------------------------------
-
-        console.log(
-            fieldName,
-            "Method 1: fill()"
-        );
-
-
-        try {{
-
-            await timeInput.fill(
-                requestedValue
-            );
-
-        }} catch (e) {{
-
-            console.log(
-                fieldName,
-                "fill() threw an error:",
-                String(e)
-            );
-        }}
-
-
-        await page.waitForTimeout(500);
-
-
-        let actualValue =
-            await timeInput.inputValue();
+        const actualStart =
+            await startTimeInput.inputValue();
 
 
         console.log(
-            fieldName,
-            "after fill():",
-            actualValue
+            "Job Start after update:",
+            actualStart
         );
 
 
         if (
-            actualValue === requestedValue
-        ) {{
-
-            console.log(
-                fieldName,
-                "SUCCESS using fill()."
-            );
-
-        }} else {{
-
-            // -------------------------------------------------
-            // METHOD 2:
-            // Native HTML setter
-            // -------------------------------------------------
-
-            console.log(
-                fieldName,
-                "Method 2: native input setter"
-            );
-
-
-            await timeInput.evaluate(
-                (el, value) => {{
-
-                    el.focus();
-
-
-                    const setter =
-                        Object.getOwnPropertyDescriptor(
-                            window.HTMLInputElement.prototype,
-                            "value"
-                        )?.set;
-
-
-                    if (!setter) {{
-
-                        throw new Error(
-                            "Native input value setter "
-                            + "could not be found."
-                        );
-                    }}
-
-
-                    setter.call(
-                        el,
-                        value
-                    );
-
-
-                    el.dispatchEvent(
-                        new Event(
-                            "input",
-                            {{
-                                bubbles: true,
-                                composed: true
-                            }}
-                        )
-                    );
-
-
-                    el.dispatchEvent(
-                        new Event(
-                            "change",
-                            {{
-                                bubbles: true,
-                                composed: true
-                            }}
-                        )
-                    );
-
-
-                    el.blur();
-
-                }},
-                requestedValue
-            );
-
-
-            await page.waitForTimeout(500);
-
-
-            actualValue =
-                await timeInput.inputValue();
-
-
-            console.log(
-                fieldName,
-                "after native setter:",
-                actualValue
-            );
-
-
-            if (
-                actualValue === requestedValue
-            ) {{
-
-                console.log(
-                    fieldName,
-                    "SUCCESS using native setter."
-                );
-
-            }} else {{
-
-                // ---------------------------------------------
-                // METHOD 3:
-                // Keyboard
-                // ---------------------------------------------
-
-                console.log(
-                    fieldName,
-                    "Method 3: keyboard input"
-                );
-
-
-                await timeInput.click();
-
-
-                await timeInput.press(
-                    "Control+A"
-                );
-
-
-                await timeInput.press(
-                    "Backspace"
-                );
-
-
-                await timeInput.type(
-                    requestedValue
-                );
-
-
-                await timeInput.press(
-                    "Tab"
-                );
-
-
-                await page.waitForTimeout(500);
-
-
-                actualValue =
-                    await timeInput.inputValue();
-
-
-                console.log(
-                    fieldName,
-                    "after keyboard:",
-                    actualValue
-                );
-
-
-                if (
-                    actualValue !== requestedValue
-                ) {{
-
-                    throw new Error(
-                        fieldName +
-                        " could not be changed. " +
-                        "Expected '" +
-                        requestedValue +
-                        "' but actual value is '" +
-                        actualValue +
-                        "'."
-                    );
-                }}
-
-
-                console.log(
-                    fieldName,
-                    "SUCCESS using keyboard."
-                );
-            }}
-        }}
-
-
-        // -----------------------------------------------------
-        // FINAL VERIFICATION
-        // -----------------------------------------------------
-
-        await page.waitForTimeout(500);
-
-
-        actualValue =
-            await timeInput.inputValue();
-
-
-        if (
-            actualValue !== requestedValue
+            actualStart !== {start_time!r}
         ) {{
 
             throw new Error(
-                fieldName +
-                " FINAL VERIFICATION FAILED. " +
+                "Job Start failed. " +
                 "Expected '" +
-                requestedValue +
+                {start_time!r} +
                 "' but got '" +
-                actualValue +
+                actualStart +
                 "'."
             );
         }}
 
 
         console.log(
-            fieldName,
-            "FINAL VERIFIED:",
-            actualValue
+            "Job Start successfully updated."
+        );
+
+    }} else {{
+
+        console.log(
+            "Job Start left unchanged."
         );
     }}
 
 
     // ---------------------------------------------------------
-    // SET JOB START FIRST
+    // JOB END
     // ---------------------------------------------------------
 
-    await setJobTime(
-        "Job Start",
-        {start_time!r}
-    );
+    if ({end_time!r}) {{
+
+        console.log(
+            "Setting Job End to:",
+            {end_time!r}
+        );
 
 
-    // ---------------------------------------------------------
-    // SET JOB END SECOND
-    // ---------------------------------------------------------
+        await endTimeInput.click();
 
-    await setJobTime(
-        "Job End",
-        {end_time!r}
-    );
+
+        await endTimeInput.fill(
+            {end_time!r}
+        );
+
+
+        // Blur the field so Halo receives the change.
+        await endTimeInput.press(
+            "Tab"
+        );
+
+
+        await page.waitForTimeout(750);
+
+
+        const actualEnd =
+            await endTimeInput.inputValue();
+
+
+        console.log(
+            "Job End after update:",
+            actualEnd
+        );
+
+
+        if (
+            actualEnd !== {end_time!r}
+        ) {{
+
+            throw new Error(
+                "Job End failed. " +
+                "Expected '" +
+                {end_time!r} +
+                "' but got '" +
+                actualEnd +
+                "'."
+            );
+        }}
+
+
+        console.log(
+            "Job End successfully updated."
+        );
+
+    }} else {{
+
+        console.log(
+            "Job End left unchanged."
+        );
+    }}
 
 
     console.log(
         "========================================"
     );
 
-    console.log(
-        "JOB TIMES COMPLETE"
-    );
+
+    // ---------------------------------------------------------
+    // FINAL TIME VERIFICATION
+    // ---------------------------------------------------------
 
     console.log(
-        "========================================"
+        "Final Job Start:",
+        await startTimeInput.inputValue()
+    );
+
+
+    console.log(
+        "Final Job End:",
+        await endTimeInput.inputValue()
     );
 
 
@@ -1360,7 +1009,7 @@ async page => {{
 
         run_cli(
             "run-code",
-            f"--filename={temp_path}"
+            f"--filename={temp_path}",
         )
 
 
@@ -1515,6 +1164,10 @@ def main():
 
                 ticket = ""
 
+
+        # -----------------------------------------------------
+        # WORKLOG TEXT
+        # -----------------------------------------------------
 
         worklog_text = ""
 
@@ -1731,13 +1384,17 @@ def main():
 
 
         # -----------------------------------------------------
-        # RUN
+        # NAVIGATE TO TICKET
         # -----------------------------------------------------
 
         goto_ticket(
             ticket
         )
 
+
+        # -----------------------------------------------------
+        # RUN AUTOMATION
+        # -----------------------------------------------------
 
         run_halo_automation(
             worklog_text,
@@ -1747,6 +1404,10 @@ def main():
             charge_type
         )
 
+
+        # -----------------------------------------------------
+        # FINAL SNAPSHOT
+        # -----------------------------------------------------
 
         take_snapshot()
 
