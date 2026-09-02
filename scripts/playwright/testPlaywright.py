@@ -10,6 +10,7 @@ import tempfile
 import time
 
 BASE_URL = "https://support.eiresystems.com/ticket"
+
 ASSIGNED_TICKETS_URL = (
     "https://support.eiresystems.com/tickets"
     "?area=1&mainview=team&viewid=2&selid=75"
@@ -24,9 +25,6 @@ SESSION = "halo"
 # ============================================================
 
 def find_playwright_cli():
-    """
-    Find playwright-cli without hard-coding the Windows username.
-    """
     cli = shutil.which("playwright-cli")
 
     if cli:
@@ -108,10 +106,8 @@ def run_cli(*args, check=True):
     if result.stdout:
         print(result.stdout)
 
-    if (
-        check
-        and result.returncode != 0
-    ):
+    if check and result.returncode != 0:
+
         raise RuntimeError(
             "Playwright CLI command failed "
             f"with exit code {result.returncode}"
@@ -125,10 +121,6 @@ def run_cli(*args, check=True):
 # ============================================================
 
 def remove_readonly(func, path, excinfo):
-    """
-    Error handler for shutil.rmtree to clear
-    read-only bits and retry on Windows.
-    """
     os.chmod(
         path,
         stat.S_IWRITE
@@ -138,9 +130,6 @@ def remove_readonly(func, path, excinfo):
 
 
 def cleanup_local_artifacts():
-    """
-    Remove local Playwright/session folders.
-    """
 
     folders_to_remove = [
         ".playwright",
@@ -193,9 +182,6 @@ atexit.register(
 # ============================================================
 
 def attach():
-    """
-    Attach to the existing Microsoft Edge session.
-    """
 
     print(
         "\nAttaching to Microsoft Edge..."
@@ -223,9 +209,6 @@ def attach():
 
 
 def goto_ticket(ticket):
-    """
-    Navigate directly to the requested Halo ticket.
-    """
 
     url = (
         f"{BASE_URL}"
@@ -251,10 +234,6 @@ def goto_ticket(ticket):
 # ============================================================
 
 def parse_snapshot_tickets(snapshot_output):
-    """
-    Parse Playwright CLI snapshot output
-    into ticket dictionaries.
-    """
 
     tickets = []
 
@@ -351,6 +330,7 @@ def _parse_single_block(block_lines):
                         val
                         and not val.startswith('[')
                     ):
+
                         clean_lines.append(val)
 
     for i, l in enumerate(clean_lines):
@@ -425,9 +405,6 @@ def _parse_single_block(block_lines):
 
 
 def scrape_ticket_options():
-    """
-    Take a snapshot and parse ticket information.
-    """
 
     print(
         "\nTaking snapshot to parse tickets..."
@@ -454,12 +431,11 @@ def run_halo_automation(
     end_time,
     charge_type
 ):
+
     """
-    Run the HaloPSA Worklog automation.
+    Automates the HaloPSA Worklog.
 
     IMPORTANT:
-    The Job Start and Job End fields are addressed
-    directly by their actual HTML name attributes.
 
     Job Start:
         input[name="actionarrivaldate_time"]
@@ -467,12 +443,27 @@ def run_halo_automation(
     Job End:
         input[name="actioncompletiondate_time"]
 
-    We do NOT discover these fields by their position
-    in the input collection.
+    These selectors were verified against the live
+    Edge session.
+
+    The Job Start interaction intentionally uses:
+
+        click()
+        fill()
+
+    exactly like the successful live test.
+
+    No input-index detection.
+    No nativeSetter.
+    No evaluate() for the time fields.
     """
 
     js_code = f"""
 async page => {{
+
+    // ========================================================
+    // OPEN WORKLOG
+    // ========================================================
 
     console.log("");
     console.log("========================================");
@@ -490,29 +481,7 @@ async page => {{
 
 
     // ========================================================
-    // WORKLOG TEXT
-    // ========================================================
-
-    console.log(
-        "Entering worklog..."
-    );
-
-    const editor = page.locator(
-        '[contenteditable="true"]'
-    ).first();
-
-    await editor.waitFor({{
-        state: "visible",
-        timeout: 10000
-    }});
-
-    await editor.fill(
-        {worklog_text!r}
-    );
-
-
-    // ========================================================
-    // ACTUAL HALO TIME FIELD LOCATORS
+    // LOCATE ACTUAL HALO TIME INPUTS
     // ========================================================
 
     const startTimeInput = page.locator(
@@ -535,10 +504,214 @@ async page => {{
     }});
 
 
+    // ========================================================
+    // VERIFY THE INPUTS
+    // ========================================================
+
     console.log("");
     console.log("========================================");
-    console.log("INITIAL TIME VALUES");
+    console.log("TIME INPUTS FOUND");
     console.log("========================================");
+
+    console.log(
+        "Start count:",
+        await startTimeInput.count()
+    );
+
+    console.log(
+        "Start visible:",
+        await startTimeInput.isVisible()
+    );
+
+    console.log(
+        "Start enabled:",
+        await startTimeInput.isEnabled()
+    );
+
+    console.log(
+        "Start value:",
+        await startTimeInput.inputValue()
+    );
+
+    console.log(
+        "End value:",
+        await endTimeInput.inputValue()
+    );
+
+
+    // ========================================================
+    // JOB START
+    // ========================================================
+
+    if ({start_time!r}) {{
+
+        console.log("");
+        console.log("========================================");
+        console.log("SETTING JOB START");
+        console.log("========================================");
+
+        console.log(
+            "Requested:",
+            {start_time!r}
+        );
+
+        console.log(
+            "Before:",
+            await startTimeInput.inputValue()
+        );
+
+        // IMPORTANT:
+        // This is deliberately the same interaction
+        // proven to work in the live playwright-cli test.
+
+        await startTimeInput.click();
+
+        console.log(
+            "Clicked Job Start."
+        );
+
+        console.log(
+            "Focused:",
+            await startTimeInput.evaluate(
+                el => document.activeElement === el
+            )
+        );
+
+        await startTimeInput.fill(
+            {start_time!r}
+        );
+
+        console.log(
+            "After fill:",
+            await startTimeInput.inputValue()
+        );
+
+        // Give Halo/React time to process the change.
+        await page.waitForTimeout(500);
+
+        console.log(
+            "After wait:",
+            await startTimeInput.inputValue()
+        );
+
+    }} else {{
+
+        console.log(
+            "Start time left unchanged."
+        );
+
+    }}
+
+
+    // ========================================================
+    // JOB END
+    // ========================================================
+
+    if ({end_time!r}) {{
+
+        console.log("");
+        console.log("========================================");
+        console.log("SETTING JOB END");
+        console.log("========================================");
+
+        console.log(
+            "Requested:",
+            {end_time!r}
+        );
+
+        console.log(
+            "Before:",
+            await endTimeInput.inputValue()
+        );
+
+        await endTimeInput.click();
+
+        console.log(
+            "Clicked Job End."
+        );
+
+        await endTimeInput.fill(
+            {end_time!r}
+        );
+
+        console.log(
+            "After fill:",
+            await endTimeInput.inputValue()
+        );
+
+        await page.waitForTimeout(500);
+
+        console.log(
+            "After wait:",
+            await endTimeInput.inputValue()
+        );
+
+    }} else {{
+
+        console.log(
+            "End time left unchanged."
+        );
+
+    }}
+
+
+    // ========================================================
+    // VERIFY TIMES BEFORE ANY OTHER FIELD
+    // ========================================================
+
+    console.log("");
+    console.log("========================================");
+    console.log("TIMES AFTER DIRECT EDIT");
+    console.log("========================================");
+
+    const startAfterTimeEdit =
+        await startTimeInput.inputValue();
+
+    const endAfterTimeEdit =
+        await endTimeInput.inputValue();
+
+    console.log(
+        "Job Start:",
+        startAfterTimeEdit
+    );
+
+    console.log(
+        "Job End:",
+        endAfterTimeEdit
+    );
+
+
+    // ========================================================
+    // WORKLOG TEXT
+    // ========================================================
+
+    console.log("");
+    console.log("========================================");
+    console.log("ENTERING WORKLOG");
+    console.log("========================================");
+
+    const editor = page.locator(
+        '[contenteditable="true"]'
+    ).first();
+
+    await editor.waitFor({{
+        state: "visible",
+        timeout: 10000
+    }});
+
+    await editor.fill(
+        {worklog_text!r}
+    );
+
+    await page.waitForTimeout(300);
+
+
+    // ========================================================
+    // VERIFY TIMES AFTER WORKLOG EDITOR
+    // ========================================================
+
+    console.log("");
+    console.log("TIMES AFTER WORKLOG:");
 
     console.log(
         "Job Start:",
@@ -556,8 +729,13 @@ async page => {{
     // ========================================================
 
     console.log("");
+    console.log("========================================");
+    console.log("SETTING STATUS");
+    console.log("========================================");
+
     console.log(
-        "Setting status: {status}"
+        "Requested status:",
+        {status!r}
     );
 
     const statusCombobox = page.getByRole(
@@ -585,123 +763,17 @@ async page => {{
     await page.waitForTimeout(500);
 
 
-    // ========================================================
-    // JOB START
-    // ========================================================
-
-    if ({start_time!r}) {{
-
-        console.log("");
-        console.log("========================================");
-        console.log("SETTING JOB START");
-        console.log("========================================");
-
-        console.log(
-            "Requested Start:",
-            {start_time!r}
-        );
-
-
-        // This is deliberately the same direct
-        // locator/fill operation that was proven
-        // to work in the live Edge test.
-
-        await startTimeInput.click();
-
-        await startTimeInput.fill(
-            {start_time!r}
-        );
-
-
-        console.log(
-            "Job Start after fill:",
-            await startTimeInput.inputValue()
-        );
-
-
-        // Move focus away from the field so Halo
-        // receives the normal browser interaction.
-
-        await startTimeInput.press(
-            "Tab"
-        );
-
-        await page.waitForTimeout(500);
-
-
-        console.log(
-            "Job Start after Tab:",
-            await startTimeInput.inputValue()
-        );
-
-    }} else {{
-
-        console.log(
-            "Start time left unchanged."
-        );
-
-    }}
+    console.log(
+        "Status selected."
+    );
 
 
     // ========================================================
-    // JOB END
-    // ========================================================
-
-    if ({end_time!r}) {{
-
-        console.log("");
-        console.log("========================================");
-        console.log("SETTING JOB END");
-        console.log("========================================");
-
-        console.log(
-            "Requested End:",
-            {end_time!r}
-        );
-
-
-        await endTimeInput.click();
-
-        await endTimeInput.fill(
-            {end_time!r}
-        );
-
-
-        console.log(
-            "Job End after fill:",
-            await endTimeInput.inputValue()
-        );
-
-
-        await endTimeInput.press(
-            "Tab"
-        );
-
-        await page.waitForTimeout(500);
-
-
-        console.log(
-            "Job End after Tab:",
-            await endTimeInput.inputValue()
-        );
-
-    }} else {{
-
-        console.log(
-            "End time left unchanged."
-        );
-
-    }}
-
-
-    // ========================================================
-    // VERIFY TIMES BEFORE CHARGE TYPE
+    // VERIFY TIMES AFTER STATUS
     // ========================================================
 
     console.log("");
-    console.log("========================================");
-    console.log("TIMES BEFORE CHARGE TYPE");
-    console.log("========================================");
+    console.log("TIMES AFTER STATUS:");
 
     console.log(
         "Job Start:",
@@ -719,8 +791,13 @@ async page => {{
     // ========================================================
 
     console.log("");
+    console.log("========================================");
+    console.log("SETTING CHARGE TYPE");
+    console.log("========================================");
+
     console.log(
-        "Setting charge type: {charge_type}"
+        "Requested charge type:",
+        {charge_type!r}
     );
 
     const chargeCombobox = page.getByRole(
@@ -748,8 +825,13 @@ async page => {{
     await page.waitForTimeout(500);
 
 
+    console.log(
+        "Charge type selected."
+    );
+
+
     // ========================================================
-    // FINAL VERIFICATION BEFORE SAVE
+    // FINAL VERIFICATION
     // ========================================================
 
     const finalStart =
@@ -776,13 +858,51 @@ async page => {{
 
 
     // ========================================================
+    // HARD CHECK
+    // ========================================================
+
+    if ({start_time!r}) {{
+
+        if (finalStart !== {start_time!r}) {{
+
+            throw new Error(
+                "JOB START DID NOT CONTAIN THE REQUESTED VALUE. "
+                + "Requested: "
+                + {start_time!r}
+                + " | Actual: "
+                + finalStart
+            );
+
+        }}
+
+    }}
+
+
+    if ({end_time!r}) {{
+
+        if (finalEnd !== {end_time!r}) {{
+
+            throw new Error(
+                "JOB END DID NOT CONTAIN THE REQUESTED VALUE. "
+                + "Requested: "
+                + {end_time!r}
+                + " | Actual: "
+                + finalEnd
+            );
+
+        }}
+
+    }}
+
+
+    // ========================================================
     // SAVE
     // ========================================================
 
     console.log("");
-    console.log(
-        "Saving worklog..."
-    );
+    console.log("========================================");
+    console.log("SAVING WORKLOG");
+    console.log("========================================");
 
 
     const saveButton = page.getByRole(
@@ -864,11 +984,13 @@ async page => {{
         ):
 
             try:
+
                 os.remove(
                     temp_path
                 )
 
             except OSError:
+
                 pass
 
 
@@ -906,7 +1028,7 @@ def main():
     try:
 
         # ------------------------------------------------------
-        # ATTACH
+        # ATTACH TO EDGE
         # ------------------------------------------------------
 
         attach()
