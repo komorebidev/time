@@ -16,15 +16,20 @@ async page => {
 
     await page.waitForTimeout(500);
 
-    await page.getByText(
-        "Completed (On Hold)",
-        { exact: true }
+    await page.getByRole(
+        "option",
+        {
+            name: "Completed (On Hold)",
+            exact: true
+        }
     ).click();
 
     await page.waitForTimeout(1000);
 
     const afterStatus = await page
-        .locator('input[name="actionarrivaldate_time"]')
+        .locator(
+            'input[name="actionarrivaldate_time"]'
+        )
         .inputValue();
 
     return {
