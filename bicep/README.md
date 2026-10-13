@@ -14,7 +14,9 @@ az deployment sub create `
   --location japaneast `
   --template-file main.bicep `
   --parameters location=japaneast `
-  --parameters allowedIp="['$($ip)/32']"
+  --parameters allowedIp="['$($ip)/32']" `
+  --yes `
+  --no-wait
 ```
 
 ## Architecture
