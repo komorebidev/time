@@ -1,0 +1,186 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Weekly Report Log</title>
+
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 600px;
+            margin: 60px auto;
+            padding: 0 20px;
+            color: #222;
+            background: #f7f8fa;
+        }
+
+        h1 {
+            margin-bottom: 8px;
+        }
+
+        p {
+            color: #555;
+            line-height: 1.5;
+        }
+
+        form {
+            margin-top: 30px;
+            padding: 24px;
+            background: white;
+            border: 1px solid #ddd;
+            border-radius: 8px;
+        }
+
+        label {
+            display: block;
+            margin-bottom: 8px;
+            font-weight: bold;
+        }
+
+        input, button {
+            box-sizing: border-box;
+            width: 100%;
+            padding: 12px;
+            margin-bottom: 20px;
+            font-size: 16px;
+        }
+
+        input {
+            border: 1px solid #aaa;
+            border-radius: 4px;
+        }
+
+        .week-preview {
+            padding: 16px;
+            margin-bottom: 20px;
+            background: #eef4fb;
+            border-radius: 6px;
+        }
+
+        .week-preview strong {
+            display: block;
+            margin-bottom: 6px;
+            color: #24476b;
+        }
+
+        .week-preview span {
+            font-size: 18px;
+            font-weight: bold;
+        }
+
+        button {
+            background: #24476b;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            margin-bottom: 0;
+        }
+
+        button:hover {
+            background: #183653;
+        }
+
+        button:disabled {
+            background: #999;
+            cursor: not-allowed;
+        }
+
+        .hint {
+            font-size: 13px;
+            color: #666;
+            margin-top: -12px;
+            margin-bottom: 20px;
+        }
+    </style>
+</head>
+
+<body>
+    <h1>Weekly Work Report</h1>
+
+    <p>
+        Choose a day within the week.
+    </p>
+
+    <form action="/download" method="post">
+        <label for="week_start">Choose a date</label>
+
+        <input
+            type="date"
+            id="week_start"
+            name="week_start"
+            required
+        >
+
+        <p class="hint">
+            You can select any day.
+        </p>
+
+        <div class="week-preview" aria-live="polite">
+            <strong>Report period</strong>
+            <span id="week-range">Choose a date first</span>
+            <p id="week-explanation">
+                The report will cover Monday through Sunday.
+            </p>
+        </div>
+
+        <button type="submit" id="generate-button" disabled>
+            Generate PDF
+        </button>
+    </form>
+
+    <script>
+        const dateInput = document.getElementById("week_start");
+        const weekRange = document.getElementById("week-range");
+        const weekExplanation = document.getElementById("week-explanation");
+        const generateButton = document.getElementById("generate-button");
+
+        function formatDate(date) {
+            const year = date.getFullYear();
+            const month = String(date.getMonth() + 1).padStart(2, "0");
+            const day = String(date.getDate()).padStart(2, "0");
+
+            return `${year}-${month}-${day}`;
+        }
+
+        function updateWeekPreview() {
+            if (!dateInput.value) {
+                weekRange.textContent = "Choose a date first";
+                weekExplanation.textContent =
+                    "The report will cover Monday through Sunday.";
+                generateButton.disabled = true;
+                generateButton.textContent = "Generate PDF";
+                return;
+            }
+
+            // Parse as a local date to avoid UTC timezone shifts.
+            const [year, month, day] = dateInput.value.split("-").map(Number);
+            const selectedDate = new Date(year, month - 1, day);
+
+            const monday = new Date(selectedDate);
+            const dayOfWeek = monday.getDay();
+
+            // Sunday (0) goes back six days; other days go back to Monday.
+            const daysSinceMonday = (dayOfWeek + 6) % 7;
+            monday.setDate(monday.getDate() - daysSinceMonday);
+
+            const sunday = new Date(monday);
+            sunday.setDate(monday.getDate() + 6);
+
+            const start = formatDate(monday);
+            const end = formatDate(sunday);
+
+            weekRange.textContent = `${start} – ${end}`;
+            weekExplanation.textContent =
+                `You selected ${formatDate(selectedDate)}. ` +
+                `The PDF will contain entries from ${start} through ${end}.`;
+
+            generateButton.textContent = `Generate PDF for ${start} – ${end}`;
+            generateButton.disabled = false;
+        }
+
+        dateInput.addEventListener("change", updateWeekPreview);
+    </script>
+</body>
+</html>
