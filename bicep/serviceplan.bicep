@@ -6,7 +6,7 @@ param location string
 @description('Suffix derived from the subscription ID.')
 param suffix string
 
-var servicePlanName = 'worklog-plan-${suffix}'
+var servicePlanName = 'time-plan-${suffix}'
 
 resource servicePlan 'Microsoft.Web/serverfarms@2024-04-01' = {
   name: servicePlanName

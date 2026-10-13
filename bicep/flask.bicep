@@ -12,7 +12,7 @@ param appServicePlanId string
 @description('Public IPv4 addresses or CIDR ranges allowed to access the web app.')
 param allowedIp array
 
-var webAppName = 'flask-time${suffix}'
+var webAppName = 'time-${suffix}'
 
 resource webApp 'Microsoft.Web/sites@2024-04-01' = {
   name: webAppName

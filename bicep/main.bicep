@@ -7,7 +7,7 @@ param location string = 'japaneast'
 param allowedIp array
 
 var suffix = substring(subscription().id, length(subscription().id) - 4, 4)
-var resourceGroupName = 'time${suffix}'
+var resourceGroupName = 'time-${suffix}'
 
 // Create the resource group.
 resource rg 'Microsoft.Resources/resourceGroups@2024-03-01' = {
