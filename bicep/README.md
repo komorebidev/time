@@ -23,8 +23,8 @@ az deployment sub create `
 ```powershell
 $subId = az account show --query id --output tsv
 $suffix = $subId.Substring($subId.Length - 4)
-$rg = "time$suffix"
-$app = "flask-time$suffix"
+$rg = "time-$suffix"
+$app = "time-$suffix"
 
 az webapp show `
   --resource-group $rg `
