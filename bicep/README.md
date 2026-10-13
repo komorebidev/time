@@ -2,6 +2,28 @@
 
 A Python Flask app that generates  PDF work logs from Markdown files with optional weekly summaries using Cloudflare Workers AI.
 
+## Azure App Service – Free Tier Behaviour
+
+The Flask weekly work report app is hosted on **Azure App Service Free tier (F1)**.
+
+- **No scale-to-zero:** App Service does not scale the application to zero instances like Azure Container Apps can.
+- **Idle behaviour:** The application may become idle when there is no traffic. The first request after inactivity may take longer to respond.
+- **Shared infrastructure:** The Free tier uses shared compute resources and has limited CPU time and resource quotas.
+- **Always On unavailable:** The Always On setting is not supported on the Free tier, so the application cannot be configured to stay continuously active through that setting.
+- **Scaling limitations:** The Free tier does not support scaling out to multiple instances.
+
+This tier is suitable for a low-traffic personal work report application, provided its resource limits are sufficient.
+
+### Verify the App Service Plan
+
+```powershell
+az appservice plan show `
+  --resource-group $rg `
+  --name $app `
+  --query "{SKU:sku.name,Tier:sku.tier}" `
+  --output table
+  ```
+
 ## Run command
 
 ```powershell
