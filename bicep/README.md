@@ -2,6 +2,21 @@
 
 A Python Flask app that generates  PDF work logs from Markdown files with optional weekly summaries using Cloudflare Workers AI.
 
+## Run command
+
+```powershell
+$ip = (Invoke-RestMethod -Uri "https://api.ipify.org").Trim()
+
+Write-Host "Allowing public IP: $ip"
+
+az deployment sub create `
+  --name "time-deployment" `
+  --location japaneast `
+  --template-file main.bicep `
+  --parameters location=japaneast `
+  --parameters allowedIp="['$($ip)/32']"
+```
+
 ## Architecture
 
 - **Azure App Service** — hosts the Flask app.
