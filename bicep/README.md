@@ -15,9 +15,23 @@ az deployment sub create `
   --template-file main.bicep `
   --parameters location=japaneast `
   --parameters allowedIp="['$($ip)/32']" `
-  --yes `
   --no-wait
 ```
+
+## Getting azure app url
+
+```powershell
+$subId = az account show --query id --output tsv
+$suffix = $subId.Substring($subId.Length - 4)
+$rg = "time$suffix"
+$app = "flask-time$suffix"
+
+az webapp show `
+  --resource-group $rg `
+  --name $app `
+  --query "defaultHostName" `
+  --output tsv
+  ```
 
 ## Architecture
 
