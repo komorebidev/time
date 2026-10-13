@@ -18,10 +18,19 @@ az deployment sub create --name worklog-reporting-deployment --location japaneas
 ```
 ## Environment variables
 
-* Set these App Service environment variables:
+* Set these App Service environment variables in the portal:
 - GITHUB_TOKEN
 - CLOUDFLARE_ACCOUNT_ID
 - CLOUDFLARE_API_TOKEN
+
+The bicep already adds the variables but they need to be filled in from the portal.
+
+### Steps in Azure Portal
+1. Open the Azure Portal.
+2. Navigate to your resource group, worklog-reporting-6411 (replace 6411 with your actual suffix).
+3. Open your App Service (worklog-flask-6411).
+4. Under Settings, select Environment variables.
+5. In App settings, add these three entries:
 
 # Local Testing
 
