@@ -3,6 +3,9 @@ targetScope = 'subscription'
 @description('Azure region for the resource group and application.')
 param location string = 'japaneast'
 
+@description('Public IP addresses or CIDR ranges allowed to access the app.')
+param allowedIp array
+
 var suffix = substring(subscription().id, length(subscription().id) - 4, 4)
 var resourceGroupName = 'time${suffix}'
 
@@ -13,7 +16,7 @@ resource rg 'Microsoft.Resources/resourceGroups@2024-03-01' = {
 }
 
 // Create the App Service Plan.
-module servicePlan 'modules/serviceplan.bicep' = {
+module servicePlan './serviceplan.bicep' = {
   scope: rg
   name: 'serviceplan-deployment'
   params: {
@@ -23,13 +26,14 @@ module servicePlan 'modules/serviceplan.bicep' = {
 }
 
 // Create the Flask web application.
-module flask 'modules/flask.bicep' = {
+module flask './flask.bicep' = {
   scope: rg
   name: 'flask-deployment'
   params: {
     location: location
     suffix: suffix
     appServicePlanId: servicePlan.outputs.appServicePlanId
+    allowedIp: allowedIp
   }
 }
 
