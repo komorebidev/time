@@ -18,6 +18,24 @@ az deployment sub create `
   --no-wait
 ```
 
+## Uploading workload to azure app (index.html and etc)
+
+* This is the actual contents of the azure app which will be hosted
+* Until now, it is only infra
+
+```powershell
+$subId = az account show --query id --output tsv
+$suffix = $subId.Substring($subId.Length - 4)
+$rg = "time$suffix"
+$app = "flask-time$suffix"
+
+az webapp deploy `
+  --resource-group $rg `
+  --name $app `
+  --src-path ".\time-app.zip" `
+  --type zip
+```
+
 ## Getting azure app url
 
 ```powershell
