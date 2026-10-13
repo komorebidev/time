@@ -36,6 +36,68 @@ az webapp deploy `
   --type zip
 ```
 
+## Fix: ZIP Deployment on Azure App Service (Linux)
+
+**Problem:** The application deployed, but Flask couldn't find `templates/index.html`. The ZIP archive contained the path `templates\\index.html` with Windows-style backslashes, which caused the Linux deployment to fail to locate the template.
+
+**Solution:** Create the ZIP using Python's `zipfile` module and explicitly specify archive paths with forward slashes.
+
+Run from the project directory:
+
+```powershell
+Set-Location "$HOME\Downloads\time-app"
+
+@'
+from pathlib import Path
+from zipfile import ZipFile, ZIP_DEFLATED
+
+root = Path.cwd()
+output = root.parent / "time-app.zip"
+
+files = [
+    "app.py",
+    "cloudflare_ai.py",
+    "github_client.py",
+    "pdf_generator.py",
+    "worklog_parser.py",
+    "requirements.txt",
+    "NotoSansJP.ttf",
+    "templates/index.html",
+]
+
+with ZipFile(output, "w", ZIP_DEFLATED) as z:
+    for name in files:
+        z.write(root / name, arcname=name)
+
+print(f"Created {output}")
+'@ | python -
+```
+
+Verify the archive contains the correct path:
+
+```powershell
+tar -tf "$HOME\Downloads\time-app.zip" |
+    Select-String "templates"
+```
+
+Expected output:
+
+```text
+templates/index.html
+```
+
+Deploy the ZIP:
+
+```powershell
+az webapp deploy `
+    --resource-group $rg `
+    --name $app `
+    --src-path "$HOME\Downloads\time-app.zip" `
+    --type zip
+```
+
+**Key lesson:** When deploying Python applications to Linux App Service, ensure ZIP entry paths use forward slashes (`/`) and that application files are at the archive root, without an extra project folder.
+
 ## Getting azure app url
 
 ```powershell
