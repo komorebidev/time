@@ -18,8 +18,8 @@ resource webApp 'Microsoft.Web/sites@2024-04-01' = {
   name: webAppName
   location: location
   kind: 'app,linux'
-  httpsOnly: true
   properties: {
+    httpsOnly: true
     serverFarmId: appServicePlanId
     reserved: true
     siteConfig: {
