@@ -2,6 +2,8 @@
 
 A Python Flask app that generates  PDF work logs from Markdown files with optional weekly summaries using Cloudflare Workers AI.
 
+* Note that the IP restriction means can only deploy from allowed source IP
+
 ## Azure App Service – Free Tier Behaviour
 
 The Flask weekly work report app is hosted on **Azure App Service Free tier (F1)**.
