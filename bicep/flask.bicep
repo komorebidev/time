@@ -24,7 +24,7 @@ resource webApp 'Microsoft.Web/sites@2024-04-01' = {
     reserved: true
     siteConfig: {
       linuxFxVersion: 'PYTHON|3.12'
-      alwaysOn: true
+      alwaysOn: false
       appCommandLine: 'gunicorn --bind=0.0.0.0:8000 --timeout 600 app:app'
       ftpsState: 'Disabled'
       minTlsVersion: '1.2'
