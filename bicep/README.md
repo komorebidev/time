@@ -17,12 +17,8 @@ This tier is suitable for a low-traffic personal work report application, provid
 ### Verify the App Service Plan
 
 ```powershell
-az appservice plan show `
-  --resource-group $rg `
-  --name $app `
-  --query "{SKU:sku.name,Tier:sku.tier}" `
-  --output table
-  ```
+az appservice plan list --query "[].{Name:name, ResourceGroup:resourceGroup, Location:location, Tier:sku.tier, SKU:sku.name, Capacity:sku.capacity}" -o table
+```
 
 ## Run command
 
@@ -36,7 +32,7 @@ az deployment sub create `
   --location japaneast `
   --template-file main.bicep `
   --parameters location=japaneast `
-  --parameters allowedIp="['$($ip)/32']" `
+  --parameters allowedIp='['$($ip)/32']' `
   --no-wait
 ```
 
