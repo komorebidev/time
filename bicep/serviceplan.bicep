@@ -13,11 +13,11 @@ resource servicePlan 'Microsoft.Web/serverfarms@2024-04-01' = {
   location: location
   kind: 'linux'
   sku: {
-    name: 'B1'
-    tier: 'Basic'
-    size: 'B1'
+    name: 'F1'
+    tier: 'Free'
+    size: 'F1'
     capacity: 1
-  }
+}
   properties: {
     reserved: true
   }
