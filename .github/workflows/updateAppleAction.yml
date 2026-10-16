@@ -1,0 +1,72 @@
+name: Update iCloud
+
+on:
+  push:
+    paths:
+      - '**/*.md'
+      - 'scripts/**/*.py'
+
+  workflow_dispatch:
+    inputs:
+      full_refresh:
+        description: 'Force full refresh (rebuild all events)'
+        required: false
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+
+jobs:
+  update-icloud:
+    runs-on: ubuntu-latest
+
+    steps:
+      # Checkout repository
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+
+      # Setup Python
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+
+      # Install dependencies
+      - name: Install dependencies
+        run: pip install icalendar
+
+      # Debug repository contents
+      - name: Debug
+        run: |
+          pwd
+          ls -R
+          python --version
+
+      # Generate iCloud calendar
+      - name: Generate iCloud calendar
+        run: |
+          if [ "${{ inputs.full_refresh }}" = "true" ]; then
+            echo "Running with FULL REFRESH..."
+            python scripts/updateApple.py . --full
+          else
+            echo "Running incrementally..."
+            python scripts/updateApple.py .
+          fi
+
+      # Commit iCloud calendar feed
+      - name: Commit iCloud calendar feed
+        run: |
+          if [ -f "docs/time.ics" ]; then
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+            git add docs/time.ics
+            git commit -m "Update iCloud calendar feed" || echo "No changes"
+            git push
+          else
+            echo "docs/time.ics was not generated."
+            exit 1
+          fi
